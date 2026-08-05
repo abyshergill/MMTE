@@ -20,6 +20,14 @@ from PyQt6.QtWidgets import (
     QGridLayout, QFileDialog, QMessageBox, QMenu, QDialog
 )
 
+
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QLabel, QPushButton, QFrame,
+    QListWidget, QListWidgetItem, QStackedWidget, QVBoxLayout, QHBoxLayout,
+    QGridLayout, QFileDialog, QMessageBox, QMenu, QDialog, QTabBar
+)
+
+
 from core.models import TerminalSession
 from core.connections import BaseConnection, SSHConnection, SerialConnection, TelnetConnection
 from core.script_engine import TeraTermMacroRunner, execute_python_script_sync
@@ -145,6 +153,9 @@ class TerminalApp(QMainWindow):
             except Exception:
                 pass
 
+    def toggle_sidebar(self):
+        self.sidebar.setVisible(not self.sidebar.isVisible())
+
     # --- UI construction ----------------------------------------------------
     def _build_ui(self):
         central = QWidget()
@@ -207,7 +218,8 @@ class TerminalApp(QMainWindow):
                 b.clicked.connect(handler)
             tb_layout.addWidget(b)
             return b
-
+        
+        self._sidebar_btn = tb_button("<<", "#4a5563", self.toggle_sidebar)
         tb_button("SSH", handler=self.connect_ssh_dialog)
         tb_button("Telnet", "#2b5c8f", self.connect_telnet_dialog)
         tb_button("Serial", handler=self.connect_serial_dialog)
@@ -218,7 +230,9 @@ class TerminalApp(QMainWindow):
         tb_button("Run Script", "#7656b7", self.run_script)
         tb_button("Multi-Script", "#8f3b76", self.open_playlist_dialog)
         tb_button("Clear", "#4a5563", self.clear_terminal)
-        tb_button("Profiles", "#4a5563", self.manage_profiles)
+        tb_button("Profiles", "#4a5563", self.manage_profiles)        
+        tb_layout.addStretch(1)
+
         tb_layout.addStretch(1)
 
         grid.addWidget(self.toolbar, 0, 1)
@@ -234,6 +248,18 @@ class TerminalApp(QMainWindow):
         self.header_label.setFont(header_font)
         content_layout.addWidget(self.header_label)
 
+
+        # ----- Tab Bar  --------------------------
+        self.tab_bar = QTabBar()
+        self.tab_bar.setExpanding(False)
+        self.tab_bar.setTabsClosable(True)
+        self.tab_bar.setMovable(True)
+        self.tab_bar.currentChanged.connect(self._on_tab_changed)
+        self.tab_bar.tabCloseRequested.connect(self._on_tab_closed)
+        content_layout.addWidget(self.tab_bar)
+
+
+
         self.stack = QStackedWidget()
         content_layout.addWidget(self.stack, 1)
 
@@ -243,6 +269,35 @@ class TerminalApp(QMainWindow):
         self.status_label.setAutoFillBackground(True)
         self.status_label.setStyleSheet("background-color: palette(alternate-base); padding: 4px 10px;")
         grid.addWidget(self.status_label, 2, 1)
+
+    def toggle_sidebar(self):
+        self.sidebar.setVisible(not self.sidebar.isVisible())
+        self._sidebar_btn.setText(">>" if not self.sidebar.isVisible() else "<<")
+
+    def _on_tab_changed(self, index):
+        if 0 <= index < len(self.sessions):
+            self.select_session(self.sessions[index])
+
+    def _on_tab_closed(self, index):
+        if 0 <= index < len(self.sessions):
+            self.close_session(self.sessions[index])
+
+    def _sync_tabs(self):
+        self.tab_bar.blockSignals(True)
+        while self.tab_bar.count() > 0:
+            self.tab_bar.removeTab(0)
+        for s in self.sessions:
+            self.tab_bar.addTab(s.name)
+        if self.active_session and self.active_session in self.sessions:
+            self.tab_bar.setCurrentIndex(self.sessions.index(self.active_session))
+        self.tab_bar.blockSignals(False)
+
+    def _update_tab_text(self, session):
+        if session in self.sessions:
+            idx = self.sessions.index(session)
+            self.tab_bar.setTabText(idx, session.name)
+
+
 
     # --- session lifecycle ---------------------------------------------------
     def new_terminal(self, name: str | None = None) -> TerminalSession:
@@ -278,6 +333,7 @@ class TerminalApp(QMainWindow):
 
     def select_session_by_name(self, name: str) -> TerminalSession | None:
         s = self.get_session_by_name(name)
+        # self._sync_tabs()
         if s:
             self.select_session(s)
             return s
@@ -292,6 +348,7 @@ class TerminalApp(QMainWindow):
         s = self.get_session_by_name(current_name)
         if s and new_name:
             s.name = new_name
+            self._update_tab_text(s)
             self.select_session(s)
             self.refresh_session_list()
             return True
@@ -534,6 +591,7 @@ class TerminalApp(QMainWindow):
     def refresh_session_list(self):
         self.session_list.clear()
         self.session_list_rows.clear()
+        self._sync_tabs()
         for s in self.sessions:
             item = QListWidgetItem()
             row = QWidget()
@@ -630,6 +688,7 @@ class TerminalApp(QMainWindow):
         d = RenameDialog(self, s.name)
         if d.exec() == QDialog.DialogCode.Accepted and d.result:
             s.name = d.result
+            self._update_tab_text(s)
             self.select_session(s)
             self.refresh_session_list()
 

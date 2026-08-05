@@ -7,6 +7,9 @@ import re
 from pathlib import Path
 from PyQt6.QtWidgets import QMessageBox
 from core.connections import SSHConnection, SerialConnection, TelnetConnection
+from PyQt6.QtWidgets import QMessageBox, QInputDialog, QLineEdit
+from PyQt6.QtWidgets import QMessageBox, QInputDialog, QLineEdit, QDialog
+
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -137,10 +140,28 @@ def execute_python_script_sync(session: "TerminalSession", path: str):
             time.sleep(float(pattern_or_seconds))
             return True
         elif isinstance(pattern_or_seconds, str):
-            return cur_sess[0].wait_for(pattern_or_seconds, timeout=timeout, case_sensitive=case_sensitive)
+            pattern = pattern_or_seconds
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                text = _run_ui_action(
+                    lambda: cur_sess[0].terminal.toPlainText()[-2000:],
+                    #lambda: cur_sess[0].terminal.toPlainText(),
+                    timeout=5.0,
+                )
+                if not case_sensitive:
+                    text = text.lower()
+                    pattern_check = pattern.lower()
+                else:
+                    pattern_check = pattern
+                if pattern_check in text:
+                    return True
+                time.sleep(0.15)
+            cur_sess[0].incoming.put(f"\r\n[wait timed out for: '{pattern}']\r\n")
+            return False
         else:
             time.sleep(1.0)
             return True
+
 
     def alert(message: str) -> bool:
         done = threading.Event()
@@ -178,6 +199,43 @@ def execute_python_script_sync(session: "TerminalSession", path: str):
 
         cur_sess[0].incoming.put(f"\r\n[Alert acknowledged: '{message}'. Continuing script...]\r\n")
         return True
+
+    def input(prompt: str = "") -> str:
+        done = threading.Event()
+        user_input = {"value": ""}
+
+        def show_input_dialog():
+            try:
+                parent_win = session.app
+                dialog = QInputDialog(parent_win)
+                dialog.setWindowTitle("Script Input")
+                dialog.setLabelText(prompt)
+                dialog.setTextValue("")
+                dialog.setTextEchoMode(QLineEdit.EchoMode.Normal)
+                if dialog.exec() == QDialog.DialogCode.Accepted:
+                    user_input["value"] = dialog.textValue()
+                else:
+                    user_input["value"] = ""
+            except Exception as e1:
+                print(f"Input dialog failed: {e1}", file=sys.stderr)
+                user_input["value"] = ""
+            finally:
+                done.set()
+
+        try:
+            if hasattr(session.app, "after"):
+                session.app.after(0, show_input_dialog)
+            else:
+                show_input_dialog()
+        except Exception:
+            show_input_dialog()
+
+        done.wait()
+
+        entered = user_input["value"]
+        cur_sess[0].incoming.put(f"\r\n[Input '{prompt}': '{entered}']\r\n")
+        return entered
+
 
     def connect_ssh(host, username, password, port=22):
         conn = SSHConnection(host=host, username=username, password=password, port=port, look_for_keys=False, allow_agent=False)
@@ -276,7 +334,7 @@ def execute_python_script_sync(session: "TerminalSession", path: str):
         "send": send, "print": print_to_terminal,
         "connect_ssh": connect_ssh, "connect_serial": connect_serial, "connect_telnet": connect_telnet,
         "wait": wait, "sleep": time.sleep,
-        "alert": alert,
+        "alert": alert, "input": input,
         "log_on": log_on, "log_off": _LogOffCallable(),
         "terminal_new": terminal_new, "terminal_close": terminal_close,
         "terminal_rename": terminal_rename,

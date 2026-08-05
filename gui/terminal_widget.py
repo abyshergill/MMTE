@@ -1,9 +1,8 @@
 from __future__ import annotations
 from PyQt6.QtCore import Qt, QEvent
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QTextOption
 from PyQt6.QtWidgets import QPlainTextEdit
 from core.theme import TERMINAL_BG, TERMINAL_FG
-
 
 class TerminalWidget(QPlainTextEdit):
     """
@@ -17,22 +16,52 @@ class TerminalWidget(QPlainTextEdit):
     def __init__(self, app: object):
         super().__init__()
         self.app = app
-        self.session = None  # assigned by TerminalApp right after construction
+        self.session = None  
 
-        # Keep setReadOnly(False) so Qt renders the native blinking cursor.
-        # Direct user edits are completely blocked by swallowing key/mouse events.
         self.setReadOnly(False)
         self.setTabChangesFocus(False)
         self.setUndoRedoEnabled(False)
+
+
         self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+        self.setWordWrapMode(QTextOption.WrapMode.WrapAnywhere)
+
         self.setAcceptDrops(True)
         self.setCursorWidth(2)
-        # self.setStyleSheet(
-        #     f"QPlainTextEdit {{ background-color: {TERMINAL_BG}; color: {TERMINAL_FG}; "
-        #     f"border: 1px solid #183248; border-radius: 8px; }}"
-        # )
+
+        self.setMaximumBlockCount(10000)
+
+        self.setViewportMargins(0, 0, 0, 0)
+
+        self.setCenterOnScroll(False)
+
         self.setFont(QFont("Consolas", 13))
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.DefaultContextMenu)
+
+    def setPlainText(self, text: str) -> None:
+        super().setPlainText(text)
+        self._invalidate_layout()
+
+    def insertPlainText(self, text: str) -> None:
+        super().insertPlainText(text)
+        self._invalidate_layout()
+
+    def appendPlainText(self, text: str) -> None:
+        super().appendPlainText(text)
+        self._invalidate_layout()
+
+    def _invalidate_layout(self) -> None:
+        """Force the document layout to recalculate synchronously."""
+        doc = self.document()
+        doc.markContentsDirty(0, doc.characterCount())
+        self.viewport().update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
 
     def focusNextPrevChild(self, next_: bool) -> bool:
         """Prevent Qt from switching widget focus on Tab / Shift+Tab."""
@@ -47,10 +76,6 @@ class TerminalWidget(QPlainTextEdit):
         return super().event(event)
 
     def canInsertFromMimeData(self, source) -> bool:
-        # setReadOnly(False) is needed purely for cursor blinking; content is
-        # otherwise driven entirely by TerminalSession.render(). Block every
-        # Qt-native insertion path (paste, IME, internal drag) so nothing can
-        # write into the document outside that pipeline.
         return False
 
     def insertFromMimeData(self, source) -> None:
@@ -69,10 +94,9 @@ class TerminalWidget(QPlainTextEdit):
 
     def keyPressEvent(self, event):
         if self.session is not None:
-            handled = self.app.handle_terminal_key(self.session, event)
-            if handled:
-                event.accept()
-                return
+            self.app.handle_terminal_key(self.session, event)
+            event.accept()
+            return
         super().keyPressEvent(event)
 
     def wheelEvent(self, event):
@@ -90,6 +114,7 @@ class TerminalWidget(QPlainTextEdit):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._invalidate_layout()
         if self.session is not None:
             self.app.on_terminal_resize(self.session)
 
