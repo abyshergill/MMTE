@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import QMessageBox, QInputDialog, QLineEdit
 from PyQt6.QtWidgets import QMessageBox, QInputDialog, QLineEdit, QDialog
 
 from typing import TYPE_CHECKING
+from core.models import ScriptStopped
 
 if TYPE_CHECKING:
     from core.models import TerminalSession
@@ -27,6 +28,7 @@ class TeraTermMacroRunner:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
         for line_no, raw in enumerate(lines, start=1):
+            self.session.script_checkpoint()
             line = self._clean_line(raw)
             if not line: continue
             if "=" in line and not line.lower().startswith("connect"):
@@ -49,7 +51,7 @@ class TeraTermMacroRunner:
             elif cmd in {"pause", "mpause"}:
                 delay = float(self._unquote(arg) or "1")
                 if cmd == "mpause": delay /= 1000
-                time.sleep(delay)
+                self._sleep_checkpoint(delay)
             else:
                 self.session.incoming.put(f"\r\n[TTL warning: unsupported command on line {line_no}: {cmd}]\r\n")
 
@@ -72,6 +74,16 @@ class TeraTermMacroRunner:
     def _unquote(self, text: str) -> str:
         text = text.strip()
         return text[1:-1] if len(text) >= 2 and text[0] == text[-1] and text[0] in {"'", '"'} else text
+
+    def _sleep_checkpoint(self, seconds: float) -> None:
+        """time.sleep() that stays responsive to Pause/Stop."""
+        deadline = time.time() + seconds
+        while True:
+            self.session.script_checkpoint()
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                return
+            time.sleep(min(0.2, remaining))
 
     def _wait(self, arg: str) -> None:
         pattern = self._unquote(arg)
@@ -126,8 +138,20 @@ def execute_python_script_sync(session: "TerminalSession", path: str):
             raise res["err"]
         return res["val"]
 
+    def sleep_checkpoint(seconds: float):
+        """Drop-in replacement for time.sleep() that stays responsive to
+        the Pause/Stop controls in the main window."""
+        deadline = time.time() + float(seconds)
+        while True:
+            cur_sess[0].script_checkpoint()
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                return
+            time.sleep(min(0.2, remaining))
+
     def send(text: str, newline: bool = True, delay: float = 0.0):
-        if delay: time.sleep(delay)
+        cur_sess[0].script_checkpoint()
+        if delay: sleep_checkpoint(delay)
         cur_sess[0].send(str(text) + ("\n" if newline else ""))
 
     def print_to_terminal(*args, sep=" ", end="\n"):
@@ -137,12 +161,13 @@ def execute_python_script_sync(session: "TerminalSession", path: str):
 
     def wait(pattern_or_seconds, timeout: float = 60.0, case_sensitive: bool = True) -> bool:
         if isinstance(pattern_or_seconds, (int, float)):
-            time.sleep(float(pattern_or_seconds))
+            sleep_checkpoint(float(pattern_or_seconds))
             return True
         elif isinstance(pattern_or_seconds, str):
             pattern = pattern_or_seconds
             deadline = time.time() + timeout
             while time.time() < deadline:
+                cur_sess[0].script_checkpoint()
                 text = _run_ui_action(
                     lambda: cur_sess[0].terminal.toPlainText()[-2000:],
                     #lambda: cur_sess[0].terminal.toPlainText(),
@@ -333,7 +358,7 @@ def execute_python_script_sync(session: "TerminalSession", path: str):
         "__file__": path, "__name__": "__automation__",
         "send": send, "print": print_to_terminal,
         "connect_ssh": connect_ssh, "connect_serial": connect_serial, "connect_telnet": connect_telnet,
-        "wait": wait, "sleep": time.sleep,
+        "wait": wait, "sleep": sleep_checkpoint,
         "alert": alert, "input": input,
         "log_on": log_on, "log_off": _LogOffCallable(),
         "terminal_new": terminal_new, "terminal_close": terminal_close,
@@ -342,4 +367,5 @@ def execute_python_script_sync(session: "TerminalSession", path: str):
         "run_script": run_script,
         "terminal_name": DynamicTerminalName()
     }
+    session.script_checkpoint()
     exec(compile(code, path, "exec"), globs, {})

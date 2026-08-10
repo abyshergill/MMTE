@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 import stat
 import threading
 import posixpath
@@ -12,7 +13,10 @@ from PyQt6.QtWidgets import (
     QFileDialog, QMessageBox
 )
 
-from core.sftp_hops import get_hops, add_jump_hop, get_active_sftp, remove_last_hop
+from core.sftp_hops import (
+    get_hops, add_jump_hop, get_active_sftp, remove_last_hop,
+    upload_folder, download_folder,
+)
 
 
 class AddHopDialog(QDialog):
@@ -128,6 +132,14 @@ class SFTPBrowserDialog(QDialog):
         download_btn.setStyleSheet("QPushButton { background-color: #256d55; color: white; }")
         download_btn.clicked.connect(self._download_selected)
         actions.addWidget(download_btn)
+        upload_folder_btn = QPushButton("Upload Folder...")
+        upload_folder_btn.setStyleSheet("QPushButton { background-color: #2f6f95; color: white; }")
+        upload_folder_btn.clicked.connect(self._upload_folder_dialog)
+        actions.addWidget(upload_folder_btn)
+        download_folder_btn = QPushButton("Download Folder")
+        download_folder_btn.setStyleSheet("QPushButton { background-color: #256d55; color: white; }")
+        download_folder_btn.clicked.connect(self._download_folder)
+        actions.addWidget(download_folder_btn)
         delete_btn = QPushButton("Delete Selected")
         delete_btn.setStyleSheet("QPushButton { background-color: #8a2d3b; color: white; }")
         delete_btn.clicked.connect(self._delete_selected)
@@ -363,6 +375,62 @@ class SFTPBrowserDialog(QDialog):
                 self.app.after(0, lambda: self._set_status(f"Downloaded {name} -> {local_path}"))
             except Exception as exc:
                 self.app.after(0, lambda: self._set_status(f"Download failed: {exc}"))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _upload_folder_dialog(self):
+        local_dir = QFileDialog.getExistingDirectory(self, "Select folder to upload")
+        if not local_dir:
+            return
+        target_dir = self.current_path
+        folder_name = Path(local_dir).name
+        remote_target = posixpath.join(target_dir.rstrip("/") or "/", folder_name)
+
+        def worker():
+            try:
+                sftp = get_active_sftp(self.session)
+            except Exception as exc:
+                self.app.after(0, lambda: self._set_status(f"SFTP unavailable: {exc}"))
+                return
+            try:
+                self.app.after(0, lambda: self._set_status(f"Uploading folder {folder_name}..."))
+
+                def progress(local_path):
+                    self.app.after(0, lambda: self._set_status(f"Uploading {Path(local_path).name}..."))
+
+                upload_folder(sftp, local_dir, remote_target, progress_cb=progress)
+                self.app.after(0, lambda: self._set_status(f"Folder '{folder_name}' uploaded"))
+                self.app.after(0, self._refresh)
+            except Exception as exc:
+                self.app.after(0, lambda: self._set_status(f"Folder upload failed: {exc}"))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _download_folder(self):
+        if not self.selected_entry or not self.selected_entry["is_dir"]:
+            QMessageBox.warning(self, "No folder selected", "Select a remote folder (not a file) to download.")
+            return
+        name = self.selected_entry["name"]
+        local_parent = QFileDialog.getExistingDirectory(self, "Choose where to save the folder")
+        if not local_parent:
+            return
+        remote_path = posixpath.join(self.current_path.rstrip("/") or "/", name)
+        local_path = os.path.join(local_parent, name)
+
+        def worker():
+            try:
+                sftp = get_active_sftp(self.session)
+            except Exception as exc:
+                self.app.after(0, lambda: self._set_status(f"SFTP unavailable: {exc}"))
+                return
+            try:
+                self.app.after(0, lambda: self._set_status(f"Downloading folder {name}..."))
+
+                def progress(remote_p):
+                    self.app.after(0, lambda: self._set_status(f"Downloading {posixpath.basename(remote_p)}..."))
+
+                download_folder(sftp, remote_path, local_path, progress_cb=progress)
+                self.app.after(0, lambda: self._set_status(f"Folder downloaded to {local_path}"))
+            except Exception as exc:
+                self.app.after(0, lambda: self._set_status(f"Folder download failed: {exc}"))
         threading.Thread(target=worker, daemon=True).start()
 
     def _delete_selected(self):

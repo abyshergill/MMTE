@@ -18,6 +18,18 @@ DEFAULT_COLS = 80
 DEFAULT_ROWS = 24
 
 
+class ScriptStopped(Exception):
+    """Raised inside automation code (TTL / Python scripts) when the user
+    requests the running script be stopped."""
+
+
+def _running_event() -> threading.Event:
+    # Set == "not paused" (i.e. free to run). Cleared == paused.
+    e = threading.Event()
+    e.set()
+    return e
+
+
 @dataclass(eq=False)
 class TerminalSession:
     app: "TerminalApp"
@@ -40,6 +52,10 @@ class TerminalSession:
     connection_lost_notified: bool = False
     sftp_hops: list = field(default_factory=list)
     active_hop_index: int = 0
+    script_running: bool = False
+    script_name: str = ""
+    script_stop_event: threading.Event = field(default_factory=threading.Event)
+    script_pause_event: threading.Event = field(default_factory=_running_event)
 
     def __post_init__(self):
         self.screen = pyte.HistoryScreen(self.cols, self.rows, history=5000, ratio=0.5)
@@ -237,6 +253,7 @@ class TerminalSession:
         needle = pattern if case_sensitive else pattern.lower()
         with self.recv_condition:
             while True:
+                self.script_checkpoint()
                 haystack = self.recv_buffer if case_sensitive else self.recv_buffer.lower()
                 if needle in haystack:
                     return True
@@ -257,6 +274,41 @@ class TerminalSession:
     def clear_wait_buffer(self) -> None:
         with self.recv_condition:
             self.recv_buffer = ""
+
+    def script_checkpoint(self) -> None:
+        """Call periodically from automation loops (TTL macro steps, python
+        script send/wait calls). Blocks while the script is paused, and
+        raises ScriptStopped if the user requested Stop."""
+        if self.script_stop_event.is_set():
+            raise ScriptStopped()
+        self.script_pause_event.wait()
+        if self.script_stop_event.is_set():
+            raise ScriptStopped()
+
+    def start_script(self, name: str) -> None:
+        self.script_running = True
+        self.script_name = name
+        self.script_stop_event.clear()
+        self.script_pause_event.set()
+
+    def finish_script(self) -> None:
+        self.script_running = False
+        self.script_name = ""
+        self.script_stop_event.clear()
+        self.script_pause_event.set()
+
+    def request_stop_script(self) -> None:
+        self.script_stop_event.set()
+        self.script_pause_event.set()  # unblock if currently paused
+
+    def toggle_pause_script(self) -> bool:
+        """Returns True if now paused, False if now resumed."""
+        if self.script_pause_event.is_set():
+            self.script_pause_event.clear()
+            return True
+        else:
+            self.script_pause_event.set()
+            return False
 
     def enable_custom_logging(self, file_path: Path) -> None:
         if self.log_enabled:

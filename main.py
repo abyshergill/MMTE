@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (
 )
 
 
-from core.models import TerminalSession
+from core.models import TerminalSession, ScriptStopped
 from core.connections import BaseConnection, SSHConnection, SerialConnection, TelnetConnection
 from core.script_engine import TeraTermMacroRunner, execute_python_script_sync
 from core.theme import TERMINAL_ACCENT, TERMINAL_BG, TERMINAL_FG
@@ -42,6 +42,7 @@ from gui.terminal_widget import TerminalWidget
 APP_NAME = "Modern Multi Terminal Emulator"
 CONFIG_DIR = Path.home() / ".modern_multi_terminal_emulator"
 PROFILES_FILE = CONFIG_DIR / "ssh_profiles.json"
+TELNET_PROFILES_FILE = CONFIG_DIR / "telnet_profiles.json"
 LOG_DIR = CONFIG_DIR / "logs"
 
 
@@ -123,6 +124,7 @@ class TerminalApp(QMainWindow):
         self._after_bridge = _AfterBridge()
 
         self.profile_store = ProfileStore(PROFILES_FILE)
+        self.telnet_profile_store = ProfileStore(TELNET_PROFILES_FILE)
         self.sessions: list[TerminalSession] = []
         self.active_session: TerminalSession | None = None
         self.session_list_rows: dict[TerminalSession, QListWidgetItem] = {}
@@ -228,6 +230,10 @@ class TerminalApp(QMainWindow):
         tb_button("Files", "#3a7d5c", self.open_sftp_dialog)
         tb_button("Help", "#b55328", lambda: SamplesDialog(self).exec())
         tb_button("Run Script", "#7656b7", self.run_script)
+        self.pause_script_btn = tb_button("⏸ Pause Script", "#4a5563", self.toggle_pause_script)
+        self.stop_script_btn = tb_button("⏹ Stop Script", "#8a2d3b", self.stop_script)
+        self.pause_script_btn.setEnabled(False)
+        self.stop_script_btn.setEnabled(False)
         tb_button("Multi-Script", "#8f3b76", self.open_playlist_dialog)
         tb_button("Clear", "#4a5563", self.clear_terminal)
         tb_button("Profiles", "#4a5563", self.manage_profiles)        
@@ -243,10 +249,18 @@ class TerminalApp(QMainWindow):
         content_layout = QVBoxLayout(self.content)
         content_layout.setContentsMargins(12, 8, 12, 4)
 
+        header_row = QHBoxLayout()
         self.header_label = QLabel("No terminal")
         header_font = QFont(); header_font.setPointSize(12); header_font.setBold(True)
         self.header_label.setFont(header_font)
-        content_layout.addWidget(self.header_label)
+        header_row.addWidget(self.header_label)
+        header_row.addStretch(1)
+        self.script_status_label = QLabel("")
+        self.script_status_label.setStyleSheet(
+            "color: #d99a2b; font-weight: bold; padding: 2px 8px;"
+        )
+        header_row.addWidget(self.script_status_label)
+        content_layout.addLayout(header_row)
 
 
         # ----- Tab Bar  --------------------------
@@ -644,8 +658,12 @@ class TerminalApp(QMainWindow):
     def connect_telnet_dialog(self):
         s = self.current_session() or self.new_terminal()
         d = TelnetDialog(self)
-        if d.exec() == QDialog.DialogCode.Accepted and d.result:
-            self.connect_session(s, TelnetConnection(d.result["host"], d.result["port"]), f"Telnet {d.result['host']}")
+        if d.exec() != QDialog.DialogCode.Accepted or not d.result:
+            return
+        if d.result["save"]:
+            pn = d.result["profile_name"] or f"{d.result['host']}:{d.result['port']}"
+            self.telnet_profile_store.upsert(pn, {"host": d.result["host"], "port": d.result["port"]})
+        self.connect_session(s, TelnetConnection(d.result["host"], d.result["port"]), f"Telnet {d.result['host']}")
 
     def connect_session(self, s: TerminalSession, conn: BaseConnection, label: str):
         if s.connection:
@@ -780,43 +798,58 @@ class TerminalApp(QMainWindow):
         s = self.current_session()
         if not s:
             return
+        if s.script_running:
+            QMessageBox.warning(self, "Script already running",
+                                 f"'{s.script_name}' is already running on this terminal. "
+                                 f"Stop it first, or switch to another terminal.")
+            return
         p, _ = QFileDialog.getOpenFileName(self, "Select Script", "", "Scripts (*.ttl *.py);;All Files (*.*)")
         if p:
             threading.Thread(target=self._run_ttl if p.lower().endswith(".ttl") else self._run_python, args=(s, p), daemon=True).start()
 
     def _run_ttl(self, s: TerminalSession, p: str):
+        s.start_script(Path(p).name)
         try:
             s.incoming.put(f"\r\n[Running TTL: {p}]\r\n")
             TeraTermMacroRunner(self, s).run_file(p)
             s.incoming.put("\r\n[TTL completed]\r\n")
+        except ScriptStopped:
+            s.incoming.put("\r\n[TTL stopped by user]\r\n")
         except Exception as exc:
             s.incoming.put(f"\r\n[TTL error: {exc}]\r\n")
+        finally:
+            s.finish_script()
 
     def _run_python(self, s: TerminalSession, p: str):
+        s.start_script(Path(p).name)
         try:
             s.incoming.put(f"\r\n[Running Python: {p}]\r\n")
             execute_python_script_sync(s, p)
             s.incoming.put("\r\n[Python completed]\r\n")
+        except ScriptStopped:
+            s.incoming.put("\r\n[Python script stopped by user]\r\n")
         except Exception as exc:
             s.incoming.put(f"\r\n[Python error: {exc}]\r\n")
+        finally:
+            s.finish_script()
 
     def manage_profiles(self):
         win = QDialog(self)
-        win.setWindowTitle("SSH Profiles")
-        win.resize(540, 360)
+        win.setWindowTitle("Saved Profiles")
+        win.resize(560, 520)
         win.setModal(True)
         root = QVBoxLayout(win)
 
-        title_lbl = QLabel("Saved SSH Profiles")
+        ssh_title = QLabel("Saved SSH Profiles")
         f = QFont(); f.setPointSize(14); f.setBold(True)
-        title_lbl.setFont(f)
-        root.addWidget(title_lbl)
+        ssh_title.setFont(f)
+        root.addWidget(ssh_title)
 
-        box = QListWidget()
-        root.addWidget(box, 1)
+        ssh_box = QListWidget()
+        root.addWidget(ssh_box, 1)
 
-        def ref():
-            box.clear()
+        def ref_ssh():
+            ssh_box.clear()
             for n, pf in sorted(self.profile_store.profiles.items()):
                 item = QListWidgetItem()
                 row = QWidget()
@@ -826,13 +859,38 @@ class TerminalApp(QMainWindow):
                 del_btn = QPushButton("Delete")
                 del_btn.setFixedWidth(70)
                 del_btn.setStyleSheet("QPushButton { background-color: #8a2d3b; color: white; }")
-                del_btn.clicked.connect(lambda _c, name=n: (self.profile_store.delete(name), ref()))
+                del_btn.clicked.connect(lambda _c, name=n: (self.profile_store.delete(name), ref_ssh()))
                 row_layout.addWidget(del_btn)
                 item.setSizeHint(row.sizeHint())
-                box.addItem(item)
-                box.setItemWidget(item, row)
+                ssh_box.addItem(item)
+                ssh_box.setItemWidget(item, row)
 
-        ref()
+        telnet_title = QLabel("Saved Telnet Profiles")
+        telnet_title.setFont(f)
+        root.addWidget(telnet_title)
+
+        telnet_box = QListWidget()
+        root.addWidget(telnet_box, 1)
+
+        def ref_telnet():
+            telnet_box.clear()
+            for n, pf in sorted(self.telnet_profile_store.profiles.items()):
+                item = QListWidgetItem()
+                row = QWidget()
+                row_layout = QHBoxLayout(row)
+                row_layout.setContentsMargins(6, 4, 6, 4)
+                row_layout.addWidget(QLabel(f"{n} ({pf.get('host','')}:{pf.get('port','')})"), 1)
+                del_btn = QPushButton("Delete")
+                del_btn.setFixedWidth(70)
+                del_btn.setStyleSheet("QPushButton { background-color: #8a2d3b; color: white; }")
+                del_btn.clicked.connect(lambda _c, name=n: (self.telnet_profile_store.delete(name), ref_telnet()))
+                row_layout.addWidget(del_btn)
+                item.setSizeHint(row.sizeHint())
+                telnet_box.addItem(item)
+                telnet_box.setItemWidget(item, row)
+
+        ref_ssh()
+        ref_telnet()
         close_row = QHBoxLayout()
         close_row.addStretch(1)
         close_btn = QPushButton("Close")
@@ -869,6 +927,32 @@ class TerminalApp(QMainWindow):
 
             if s is self.active_session:
                 self.header_label.setText(self._status_text(s))
+                self._update_script_status_ui(s)
+
+    def _update_script_status_ui(self, s: TerminalSession) -> None:
+        if s.script_running:
+            paused = not s.script_pause_event.is_set()
+            state = "PAUSED" if paused else "RUNNING"
+            self.script_status_label.setText(f"\u23f3 Script {state}: {s.script_name}")
+            self.pause_script_btn.setEnabled(True)
+            self.pause_script_btn.setText("\u25b6 Resume" if paused else "\u23f8 Pause Script")
+            self.stop_script_btn.setEnabled(True)
+        else:
+            self.script_status_label.setText("")
+            self.pause_script_btn.setEnabled(False)
+            self.pause_script_btn.setText("\u23f8 Pause Script")
+            self.stop_script_btn.setEnabled(False)
+
+    def toggle_pause_script(self):
+        s = self.current_session()
+        if s and s.script_running:
+            s.toggle_pause_script()
+            self._update_script_status_ui(s)
+
+    def stop_script(self):
+        s = self.current_session()
+        if s and s.script_running:
+            s.request_stop_script()
 
     def closeEvent(self, event):
         for s in list(self.sessions):

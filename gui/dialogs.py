@@ -325,7 +325,7 @@ class TelnetDialog(QDialog):
         self.app = app
         self.result: dict | None = None
         self.setWindowTitle("Connect Telnet")
-        self.resize(400, 200)
+        self.resize(420, 280)
         self.setModal(True)
 
         grid = QGridLayout(self)
@@ -333,15 +333,29 @@ class TelnetDialog(QDialog):
         title.setFont(_bold(16))
         grid.addWidget(title, 0, 0, 1, 2)
 
-        grid.addWidget(QLabel("Host / IP"), 1, 0)
+        grid.addWidget(QLabel("Saved profile"), 1, 0)
+        self.profile_combo = QComboBox()
+        self.profile_combo.addItems([""] + sorted(self.app.telnet_profile_store.profiles.keys()))
+        self.profile_combo.currentTextChanged.connect(self._load_profile)
+        grid.addWidget(self.profile_combo, 1, 1)
+
+        grid.addWidget(QLabel("Profile name"), 2, 0)
+        self.profile_name = QLineEdit()
+        grid.addWidget(self.profile_name, 2, 1)
+
+        grid.addWidget(QLabel("Host / IP"), 3, 0)
         self.host_entry = QLineEdit()
         self.host_entry.setPlaceholderText("192.168.1.1")
-        grid.addWidget(self.host_entry, 1, 1)
+        grid.addWidget(self.host_entry, 3, 1)
 
-        grid.addWidget(QLabel("Port"), 2, 0)
+        grid.addWidget(QLabel("Port"), 4, 0)
         self.port_entry = QLineEdit("23")
         self.port_entry.setFixedWidth(80)
-        grid.addWidget(self.port_entry, 2, 1)
+        grid.addWidget(self.port_entry, 4, 1)
+
+        self.save_profile_cb = QCheckBox("Save/update profile")
+        self.save_profile_cb.setChecked(True)
+        grid.addWidget(self.save_profile_cb, 5, 1)
 
         btn_row = QHBoxLayout()
         cancel_btn = QPushButton("Cancel")
@@ -351,7 +365,15 @@ class TelnetDialog(QDialog):
         connect_btn.setDefault(True)
         btn_row.addWidget(cancel_btn)
         btn_row.addWidget(connect_btn)
-        grid.addLayout(btn_row, 3, 0, 1, 2)
+        grid.addLayout(btn_row, 6, 0, 1, 2)
+
+    def _load_profile(self, name: str):
+        if not name:
+            return
+        p = self.app.telnet_profile_store.profiles.get(name, {})
+        self.profile_name.setText(name)
+        self.host_entry.setText(p.get("host", ""))
+        self.port_entry.setText(str(p.get("port", "23")))
 
     def _ok(self):
         if not self.host_entry.text().strip():
@@ -362,7 +384,12 @@ class TelnetDialog(QDialog):
         except ValueError:
             QMessageBox.critical(self, "Invalid Port", "Numeric only.")
             return
-        self.result = {"host": self.host_entry.text().strip(), "port": port}
+        self.result = {
+            "profile_name": self.profile_name.text().strip(),
+            "host": self.host_entry.text().strip(),
+            "port": port,
+            "save": self.save_profile_cb.isChecked(),
+        }
         self.accept()
 
 

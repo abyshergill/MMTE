@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QGridLayout, QFileDialog, QMessageBox, QSizePolicy
 )
 
-from core.models import PlaylistItem
+from core.models import PlaylistItem, ScriptStopped
 from core.script_engine import TeraTermMacroRunner, execute_python_script_sync
 from gui.dialogs import OperatorGateDialog
 
@@ -81,14 +81,23 @@ class PlaylistSupervisorThread(QThread):
             self._push_ui()
             sess.incoming.put(f"[Playlist ➔] Executing: {Path(item.path).name}\n")
 
+            sess.start_script(Path(item.path).name)
             start_marker, code_failed, error_reason = len(sess.recv_buffer), False, ""
             try:
                 if item.path.lower().endswith(".ttl"):
                     TeraTermMacroRunner(self.app, sess).run_file(item.path)
                 else:
                     execute_python_script_sync(sess, item.path)
+            except ScriptStopped:
+                item.status, self.stopped = "Stopped", True
+                sess.incoming.put("[Playlist 🛑] Script stopped by user.\n")
+                sess.finish_script()
+                self._push_ui()
+                break
             except Exception as e:
                 code_failed, error_reason = True, f"Script Exception: {e}"
+            finally:
+                sess.finish_script()
 
             current_timeout, passed = item.timeout, False
             while not passed and not self.stopped:
@@ -200,6 +209,17 @@ class MultiScriptDialog(QDialog):
         add_btn.clicked.connect(self._add_files)
         toolbar_layout.addWidget(add_btn)
         toolbar_layout.addStretch(1)
+        self.pause_btn = QPushButton("⏸ Pause")
+        self.pause_btn.setFixedWidth(90)
+        self.pause_btn.setEnabled(False)
+        self.pause_btn.clicked.connect(self._toggle_pause)
+        toolbar_layout.addWidget(self.pause_btn)
+        self.stop_btn = QPushButton("⏹ Stop Suite")
+        self.stop_btn.setFixedWidth(100)
+        self.stop_btn.setStyleSheet("QPushButton { background-color: #8a2d3b; color: white; }")
+        self.stop_btn.setEnabled(False)
+        self.stop_btn.clicked.connect(self._stop_suite)
+        toolbar_layout.addWidget(self.stop_btn)
         self.launch_btn = QPushButton("Launch Full Suite")
         self.launch_btn.setFixedWidth(150)
         self.launch_btn.setStyleSheet("QPushButton { background-color: #256d55; color: white; }")
@@ -229,6 +249,36 @@ class MultiScriptDialog(QDialog):
             except RuntimeError:
                 # underlying C++ widget already deleted
                 pass
+
+        running_sess = self._current_running_session()
+        active = bool(running_sess and running_sess.script_running)
+        self.pause_btn.setEnabled(active)
+        self.stop_btn.setEnabled(active)
+        if active:
+            paused = not running_sess.script_pause_event.is_set()
+            self.pause_btn.setText("▶ Resume" if paused else "⏸ Pause")
+        else:
+            self.pause_btn.setText("⏸ Pause")
+
+    def _current_running_session(self):
+        for item in self.playlist:
+            if item.target_session.script_running:
+                return item.target_session
+        return None
+
+    def _toggle_pause(self):
+        sess = self._current_running_session()
+        if not sess or not sess.script_running:
+            return
+        paused = sess.toggle_pause_script()
+        self.pause_btn.setText("▶ Resume" if paused else "⏸ Pause")
+
+    def _stop_suite(self):
+        if self.supervisor:
+            self.supervisor.stopped = True
+        sess = self._current_running_session()
+        if sess and sess.script_running:
+            sess.request_stop_script()
 
     def _clear_layout(self, layout):
         while layout.count():
