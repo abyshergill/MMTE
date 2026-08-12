@@ -45,6 +45,167 @@ PROFILES_FILE = CONFIG_DIR / "ssh_profiles.json"
 TELNET_PROFILES_FILE = CONFIG_DIR / "telnet_profiles.json"
 LOG_DIR = CONFIG_DIR / "logs"
 
+APP_STYLESHEET = f"""
+QMainWindow {{
+    background-color: #12161b;
+}}
+
+/* --- Top menu bar --- */
+QMenuBar {{
+    background-color: #171c22;
+    color: #dbe6e2;
+    padding: 3px 8px;
+    font-size: 13px;
+    border-bottom: 1px solid #262d35;
+}}
+QMenuBar::item {{
+    background: transparent;
+    padding: 7px 16px;
+    margin: 1px 2px;
+    border-radius: 5px;
+}}
+QMenuBar::item:selected {{
+    background-color: #212a32;
+    color: {TERMINAL_ACCENT};
+}}
+QMenuBar::item:pressed {{
+    background-color: #26313b;
+}}
+QMenu {{
+    background-color: #171c22;
+    color: #dbe6e2;
+    border: 1px solid #2a323c;
+    padding: 6px;
+    border-radius: 6px;
+}}
+QMenu::item {{
+    padding: 7px 28px 7px 16px;
+    border-radius: 4px;
+}}
+QMenu::item:selected {{
+    background-color: #223138;
+    color: {TERMINAL_ACCENT};
+}}
+QMenu::item:disabled {{
+    color: #56626b;
+}}
+QMenu::separator {{
+    height: 1px;
+    background: #2a323c;
+    margin: 5px 8px;
+}}
+
+/* --- Sidebar --- */
+QFrame#Sidebar {{
+    background-color: #171c22;
+    border-right: 1px solid #262d35;
+}}
+QLabel#SidebarTitle {{
+    color: #8aa0ac;
+    letter-spacing: 1px;
+}}
+QLabel#SidebarSubtitle {{
+    color: #5c6b74;
+    font-size: 11px;
+    letter-spacing: 1px;
+    padding-top: 2px;
+}}
+QPushButton#CollapseBtn {{
+    background: transparent;
+    color: #8aa0ac;
+    border: none;
+    border-radius: 4px;
+    font-weight: bold;
+}}
+QPushButton#CollapseBtn:hover {{
+    background-color: #222a32;
+    color: {TERMINAL_ACCENT};
+}}
+QListWidget#SessionList {{
+    background-color: transparent;
+    border: none;
+}}
+
+/* --- Generic buttons --- */
+QPushButton {{
+    background-color: #232b33;
+    color: #dbe6e2;
+    border: 1px solid #2e3841;
+    border-radius: 6px;
+    padding: 7px 12px;
+}}
+QPushButton:hover {{
+    background-color: #2b3540;
+    border-color: {TERMINAL_ACCENT};
+}}
+QPushButton:pressed {{
+    background-color: #1c232a;
+}}
+QPushButton:disabled {{
+    color: #55626b;
+    border-color: #262d35;
+    background-color: #1b2127;
+}}
+QPushButton#AccentBtn {{
+    background-color: {TERMINAL_ACCENT};
+    color: #06231d;
+    border: none;
+    font-weight: bold;
+}}
+QPushButton#AccentBtn:hover {{
+    background-color: #55d9c8;
+}}
+QPushButton#DangerBtn {{
+    background-color: #3a2126;
+    border-color: #6b2f39;
+    color: #f0b7bd;
+}}
+QPushButton#DangerBtn:hover {{
+    background-color: #5c2530;
+}}
+
+/* --- Tab bar --- */
+QTabBar::tab {{
+    background: #171c22;
+    color: #8aa0ac;
+    padding: 7px 20px;
+    margin-right: 2px;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    border: 1px solid #262d35;
+    border-bottom: none;
+}}
+QTabBar::tab:selected {{
+    background: {TERMINAL_BG};
+    color: {TERMINAL_ACCENT};
+    border-color: #2e3841;
+    border-bottom: 2px solid {TERMINAL_ACCENT};
+}}
+QTabBar::tab:hover {{
+    color: #dbe6e2;
+}}
+
+/* --- Status bar --- */
+QLabel#StatusBar {{
+    background-color: #171c22;
+    color: #8aa0ac;
+    padding: 5px 12px;
+    border-top: 1px solid #262d35;
+    font-size: 12px;
+}}
+
+QLineEdit, QComboBox {{
+    background-color: #171c22;
+    border: 1px solid #2e3841;
+    border-radius: 5px;
+    padding: 5px 8px;
+    color: #dbe6e2;
+}}
+QLineEdit:focus, QComboBox:focus {{
+    border-color: {TERMINAL_ACCENT};
+}}
+"""
+
 
 class ProfileStore:
     def __init__(self, path: Path):
@@ -157,91 +318,102 @@ class TerminalApp(QMainWindow):
 
     def toggle_sidebar(self):
         self.sidebar.setVisible(not self.sidebar.isVisible())
+        self._sidebar_btn.setText("\u276f" if not self.sidebar.isVisible() else "\u276e")
+
+    # --- Top menu bar --------------------------------------------------------
+    def _build_menu_bar(self):
+        menubar = self.menuBar()
+        menubar.setNativeMenuBar(False)
+
+        conn_menu = menubar.addMenu("&Connection")
+        conn_menu.addAction("SSH...", self.connect_ssh_dialog)
+        conn_menu.addAction("Telnet...", self.connect_telnet_dialog)
+        conn_menu.addAction("Serial...", self.connect_serial_dialog)
+        conn_menu.addSeparator()
+        conn_menu.addAction("Disconnect", self.disconnect_current)
+
+        script_menu = menubar.addMenu("&Scripting")
+        script_menu.addAction("Run Script...", self.run_script)
+        self.pause_script_btn = script_menu.addAction("\u23f8 Pause Script", self.toggle_pause_script)
+        self.stop_script_btn = script_menu.addAction("\u23f9 Stop Script", self.stop_script)
+        self.pause_script_btn.setEnabled(False)
+        self.stop_script_btn.setEnabled(False)
+        script_menu.addSeparator()
+        script_menu.addAction("Multi-Script Suite...", self.open_playlist_dialog)
+
+        util_menu = menubar.addMenu("&Utility")
+        util_menu.addAction("Files (SFTP Browser)...", self.open_sftp_dialog)
+        util_menu.addAction("Saved Profiles...", self.manage_profiles)
+        util_menu.addSeparator()
+        util_menu.addAction("Clear Terminal", self.clear_terminal)
+        util_menu.addSeparator()
+        self.logging_menu_action = util_menu.addAction("Start Logging...", self.toggle_logging)
+
+        help_menu = menubar.addMenu("&Help")
+        help_menu.addAction("Sample Scripts && Templates...", lambda: SamplesDialog(self).exec())
+        help_menu.addAction("Developer Info / About...", lambda: SamplesDialog(self).exec())
 
     # --- UI construction ----------------------------------------------------
     def _build_ui(self):
+        self.setStyleSheet(APP_STYLESHEET)
+        self._build_menu_bar()
+
         central = QWidget()
         self.setCentralWidget(central)
         grid = QGridLayout(central)
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setSpacing(0)
         grid.setColumnStretch(1, 1)
-        grid.setRowStretch(1, 1)
+        grid.setRowStretch(0, 1)
 
         # --- Sidebar ---
         self.sidebar = QFrame()
+        self.sidebar.setObjectName("Sidebar")
         self.sidebar.setFixedWidth(245)
         self.sidebar.setAutoFillBackground(True)
-        self.sidebar.setStyleSheet("QFrame { background-color: palette(base); }")
         sb_layout = QVBoxLayout(self.sidebar)
-        sb_layout.setContentsMargins(14, 18, 14, 12)
+        sb_layout.setContentsMargins(14, 16, 14, 12)
 
-        title_lbl = QLabel("Terminals")
-        title_font = QFont(); title_font.setPointSize(16); title_font.setBold(True)
+        title_row = QHBoxLayout()
+        title_lbl = QLabel("TERMINALS")
+        title_lbl.setObjectName("SidebarTitle")
+        title_font = QFont(); title_font.setPointSize(12); title_font.setBold(True)
         title_lbl.setFont(title_font)
-        sb_layout.addWidget(title_lbl)
-        sb_layout.addSpacing(6)
+        title_row.addWidget(title_lbl, 1)
+        self._sidebar_btn = QPushButton("\u276e")
+        self._sidebar_btn.setObjectName("CollapseBtn")
+        self._sidebar_btn.setFixedSize(24, 24)
+        self._sidebar_btn.setFlat(True)
+        self._sidebar_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._sidebar_btn.clicked.connect(self.toggle_sidebar)
+        title_row.addWidget(self._sidebar_btn)
+        sb_layout.addLayout(title_row)
+        sb_layout.addSpacing(10)
 
         new_btn = QPushButton("+ New Terminal")
+        new_btn.setObjectName("AccentBtn")
         new_btn.clicked.connect(lambda: self.new_terminal())
         sb_layout.addWidget(new_btn)
 
         rename_btn = QPushButton("Rename Selected")
-        rename_btn.setStyleSheet("QPushButton { background-color: #2f6f95; color: white; }")
         rename_btn.clicked.connect(self.rename_terminal)
         sb_layout.addWidget(rename_btn)
 
         close_btn = QPushButton("Close Selected")
-        close_btn.setStyleSheet("QPushButton { background-color: #8a2d3b; color: white; }")
+        close_btn.setObjectName("DangerBtn")
         close_btn.clicked.connect(self.close_current_terminal)
         sb_layout.addWidget(close_btn)
 
-        sb_layout.addSpacing(8)
-        sb_layout.addWidget(QLabel("Open sessions"))
+        sb_layout.addSpacing(10)
+        sessions_lbl = QLabel("OPEN SESSIONS")
+        sessions_lbl.setObjectName("SidebarSubtitle")
+        sb_layout.addWidget(sessions_lbl)
         self.session_list = QListWidget()
-        self.session_list.setStyleSheet("QListWidget { background-color: palette(base); border: none; }")
+        self.session_list.setObjectName("SessionList")
+        self.session_list.setFrameShape(QFrame.Shape.NoFrame)
         sb_layout.addWidget(self.session_list, 1)
 
-        grid.addWidget(self.sidebar, 0, 0, 3, 1)
-
-        # --- Toolbar ---
-        self.toolbar = QFrame()
-        self.toolbar.setFixedHeight(58)
-        self.toolbar.setAutoFillBackground(True)
-        self.toolbar.setStyleSheet("QFrame { background-color: palette(alternate-base); }")
-        tb_layout = QHBoxLayout(self.toolbar)
-        tb_layout.setContentsMargins(12, 8, 12, 8)
-
-        def tb_button(text, color=None, handler=None):
-            b = QPushButton(text)
-            if color:
-                b.setStyleSheet(f"QPushButton {{ background-color: {color}; color: white; }}")
-            if handler:
-                b.clicked.connect(handler)
-            tb_layout.addWidget(b)
-            return b
-        
-        self._sidebar_btn = tb_button("<<", "#4a5563", self.toggle_sidebar)
-        tb_button("SSH", handler=self.connect_ssh_dialog)
-        tb_button("Telnet", "#2b5c8f", self.connect_telnet_dialog)
-        tb_button("Serial", handler=self.connect_serial_dialog)
-        tb_button("Disconnect", "#4a5563", self.disconnect_current)
-        tb_button("Logging", "#256d55", self.toggle_logging)
-        tb_button("Files", "#3a7d5c", self.open_sftp_dialog)
-        tb_button("Help", "#b55328", lambda: SamplesDialog(self).exec())
-        tb_button("Run Script", "#7656b7", self.run_script)
-        self.pause_script_btn = tb_button("⏸ Pause Script", "#4a5563", self.toggle_pause_script)
-        self.stop_script_btn = tb_button("⏹ Stop Script", "#8a2d3b", self.stop_script)
-        self.pause_script_btn.setEnabled(False)
-        self.stop_script_btn.setEnabled(False)
-        tb_button("Multi-Script", "#8f3b76", self.open_playlist_dialog)
-        tb_button("Clear", "#4a5563", self.clear_terminal)
-        tb_button("Profiles", "#4a5563", self.manage_profiles)        
-        tb_layout.addStretch(1)
-
-        tb_layout.addStretch(1)
-
-        grid.addWidget(self.toolbar, 0, 1)
+        grid.addWidget(self.sidebar, 0, 0, 2, 1)
 
         # --- Content (stacked terminal widgets) ---
         self.content = QFrame()
@@ -277,38 +449,45 @@ class TerminalApp(QMainWindow):
         self.stack = QStackedWidget()
         content_layout.addWidget(self.stack, 1)
 
-        grid.addWidget(self.content, 1, 1)
+        grid.addWidget(self.content, 0, 1)
 
         self.status_label = QLabel("Ready")
+        self.status_label.setObjectName("StatusBar")
         self.status_label.setAutoFillBackground(True)
-        self.status_label.setStyleSheet("background-color: palette(alternate-base); padding: 4px 10px;")
-        grid.addWidget(self.status_label, 2, 1)
-
-    def toggle_sidebar(self):
-        self.sidebar.setVisible(not self.sidebar.isVisible())
-        self._sidebar_btn.setText(">>" if not self.sidebar.isVisible() else "<<")
+        grid.addWidget(self.status_label, 1, 1)
 
     def _on_tab_changed(self, index):
-        if 0 <= index < len(self.sessions):
-            self.select_session(self.sessions[index])
+        session = self.tab_bar.tabData(index) if index >= 0 else None
+        if session is not None:
+            self.select_session(session)
 
     def _on_tab_closed(self, index):
-        if 0 <= index < len(self.sessions):
-            self.close_session(self.sessions[index])
+        session = self.tab_bar.tabData(index)
+        if session is not None:
+            self.close_session(session)
+
+    def _tab_index_for_session(self, session) -> int:
+        for i in range(self.tab_bar.count()):
+            if self.tab_bar.tabData(i) is session:
+                return i
+        return -1
 
     def _sync_tabs(self):
         self.tab_bar.blockSignals(True)
         while self.tab_bar.count() > 0:
             self.tab_bar.removeTab(0)
         for s in self.sessions:
-            self.tab_bar.addTab(s.name)
-        if self.active_session and self.active_session in self.sessions:
-            self.tab_bar.setCurrentIndex(self.sessions.index(self.active_session))
+            idx = self.tab_bar.addTab(s.name)
+            self.tab_bar.setTabData(idx, s)
+        if self.active_session is not None:
+            idx = self._tab_index_for_session(self.active_session)
+            if idx != -1:
+                self.tab_bar.setCurrentIndex(idx)
         self.tab_bar.blockSignals(False)
 
     def _update_tab_text(self, session):
-        if session in self.sessions:
-            idx = self.sessions.index(session)
+        idx = self._tab_index_for_session(session)
+        if idx != -1:
             self.tab_bar.setTabText(idx, session.name)
 
 
@@ -590,6 +769,11 @@ class TerminalApp(QMainWindow):
         self.header_label.setText(self._status_text(session))
         session.terminal.setFocus()
         self._highlight_session_list()
+        idx = self._tab_index_for_session(session)
+        if idx != -1 and self.tab_bar.currentIndex() != idx:
+            self.tab_bar.blockSignals(True)
+            self.tab_bar.setCurrentIndex(idx)
+            self.tab_bar.blockSignals(False)
 
     def _highlight_session_list(self):
         for s, item in self.session_list_rows.items():
@@ -727,6 +911,7 @@ class TerminalApp(QMainWindow):
         if s.log_enabled:
             s.disable_logging()
             self.select_session(s)
+            self.logging_menu_action.setText("Start Logging...")
         else:
             sn = re.sub(r"[^A-Za-z0-9_.-]+", "_", s.name).strip("_") or "terminal"
             LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -735,6 +920,7 @@ class TerminalApp(QMainWindow):
             if p:
                 s.enable_custom_logging(Path(p))
                 self.select_session(s)
+                self.logging_menu_action.setText("Stop Logging")
 
     def open_playlist_dialog(self):
         if not self.sessions:
@@ -791,8 +977,7 @@ class TerminalApp(QMainWindow):
     def clear_terminal(self):
         s = self.current_session()
         if s:
-            s.terminal.clear()
-            s.clear_wait_buffer()
+            s.clear_screen()
 
     def run_script(self):
         s = self.current_session()

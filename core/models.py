@@ -275,6 +275,21 @@ class TerminalSession:
         with self.recv_condition:
             self.recv_buffer = ""
 
+    def clear_screen(self) -> None:
+        """Fully clear the terminal. Clearing only the QTextEdit widget is not
+        enough: render() always repaints from self.screen's buffer, so the
+        next render() call (e.g. triggered by the next byte of incoming data)
+        would silently restore the 'cleared' content. Reset the underlying
+        pyte screen buffer/history too so the clear actually sticks."""
+        try:
+            self.screen.reset()
+        except Exception:
+            pass
+        self.scroll_offset = 0
+        with self.recv_condition:
+            self.recv_buffer = ""
+        self.render()
+
     def script_checkpoint(self) -> None:
         """Call periodically from automation loops (TTL macro steps, python
         script send/wait calls). Blocks while the script is paused, and
