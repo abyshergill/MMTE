@@ -347,7 +347,14 @@ class TerminalApp(QMainWindow):
         util_menu.addSeparator()
         util_menu.addAction("Clear Terminal", self.clear_terminal)
         util_menu.addSeparator()
-        self.logging_menu_action = util_menu.addAction("Start Logging...", self.toggle_logging)
+        self.start_logging_action = util_menu.addAction("Start Logging...", self.start_logging)
+        self.pause_logging_action = util_menu.addAction("\u23f8 Pause Logging", self.toggle_pause_logging)
+        self.stop_logging_action = util_menu.addAction("\u23f9 Stop Logging", self.stop_logging)
+        self.pause_logging_action.setEnabled(False)
+        self.stop_logging_action.setEnabled(False)
+        util_menu.addSeparator()
+        toggle_sidebar_action = util_menu.addAction("Show/Hide Sidebar", self.toggle_sidebar)
+        toggle_sidebar_action.setShortcut("Ctrl+B")
 
         help_menu = menubar.addMenu("&Help")
         help_menu.addAction("Sample Scripts && Templates...", lambda: SamplesDialog(self).exec())
@@ -762,18 +769,24 @@ class TerminalApp(QMainWindow):
 
     # --- session selection / list -----------------------------------------------
     def select_session(self, session: TerminalSession):
-        if self.active_session is session:
-            return
-        self.active_session = session
-        self.stack.setCurrentWidget(session.frame)
+        if self.active_session is not session:
+            self.active_session = session
+            self.stack.setCurrentWidget(session.frame)
+            session.terminal.setFocus()
+            self._highlight_session_list()
+            idx = self._tab_index_for_session(session)
+            if idx != -1 and self.tab_bar.currentIndex() != idx:
+                self.tab_bar.blockSignals(True)
+                self.tab_bar.setCurrentIndex(idx)
+                self.tab_bar.blockSignals(False)
+        # Always refresh the header text, even if this session was already
+        # active. Without this, renaming the CURRENT terminal would leave the
+        # header showing the old name until the next 40ms poll tick (or
+        # forever, if the poll loop were ever paused) -- a visible mismatch
+        # between the tab bar / sidebar (updated immediately) and the header.
         self.header_label.setText(self._status_text(session))
-        session.terminal.setFocus()
-        self._highlight_session_list()
-        idx = self._tab_index_for_session(session)
-        if idx != -1 and self.tab_bar.currentIndex() != idx:
-            self.tab_bar.blockSignals(True)
-            self.tab_bar.setCurrentIndex(idx)
-            self.tab_bar.blockSignals(False)
+        self._update_script_status_ui(session)
+        self._update_logging_menu_ui(session)
 
     def _highlight_session_list(self):
         for s, item in self.session_list_rows.items():
@@ -816,7 +829,11 @@ class TerminalApp(QMainWindow):
         return self.active_session
 
     def _status_text(self, s: TerminalSession) -> str:
-        base = f"{s.name}  \u00b7  {s.connected_label}  \u00b7  Logging: {'ON' if s.log_enabled else 'OFF'}"
+        if s.log_enabled:
+            log_state = "PAUSED" if s.log_paused else "ON"
+        else:
+            log_state = "OFF"
+        base = f"{s.name}  \u00b7  {s.connected_label}  \u00b7  Logging: {log_state}"
         if s.scroll_offset:
             base += f"  \u00b7  Scrollback ({s.scroll_offset} lines back)"
         return base
@@ -903,24 +920,50 @@ class TerminalApp(QMainWindow):
             return
         self.close_session_direct(s)
 
-    def toggle_logging(self):
+    def start_logging(self):
         s = self.current_session()
         if not s:
             QMessageBox.warning(self, "No Terminal", "Open terminal first.")
             return
         if s.log_enabled:
-            s.disable_logging()
+            QMessageBox.information(self, "Already logging", f"'{s.name}' is already logging to a file. Stop it first to start a new one.")
+            return
+        sn = re.sub(r"[^A-Za-z0-9_.-]+", "_", s.name).strip("_") or "terminal"
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        default_name = f"{sn}_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        p, _ = QFileDialog.getSaveFileName(self, "Save Log", str(LOG_DIR / default_name), "Logs (*.log);;All Files (*.*)")
+        if p:
+            s.enable_custom_logging(Path(p))
             self.select_session(s)
-            self.logging_menu_action.setText("Start Logging...")
+
+    def toggle_pause_logging(self):
+        s = self.current_session()
+        if not s or not s.log_enabled:
+            return
+        if s.log_paused:
+            s.resume_logging()
         else:
-            sn = re.sub(r"[^A-Za-z0-9_.-]+", "_", s.name).strip("_") or "terminal"
-            LOG_DIR.mkdir(parents=True, exist_ok=True)
-            default_name = f"{sn}_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-            p, _ = QFileDialog.getSaveFileName(self, "Save Log", str(LOG_DIR / default_name), "Logs (*.log);;All Files (*.*)")
-            if p:
-                s.enable_custom_logging(Path(p))
-                self.select_session(s)
-                self.logging_menu_action.setText("Stop Logging")
+            s.pause_logging()
+        self.select_session(s)
+
+    def stop_logging(self):
+        s = self.current_session()
+        if not s or not s.log_enabled:
+            return
+        s.disable_logging()
+        self.select_session(s)
+
+    def _update_logging_menu_ui(self, s: TerminalSession) -> None:
+        if s.log_enabled:
+            self.start_logging_action.setEnabled(False)
+            self.pause_logging_action.setEnabled(True)
+            self.pause_logging_action.setText("\u25b6 Resume Logging" if s.log_paused else "\u23f8 Pause Logging")
+            self.stop_logging_action.setEnabled(True)
+        else:
+            self.start_logging_action.setEnabled(True)
+            self.pause_logging_action.setEnabled(False)
+            self.pause_logging_action.setText("\u23f8 Pause Logging")
+            self.stop_logging_action.setEnabled(False)
 
     def open_playlist_dialog(self):
         if not self.sessions:
@@ -1113,6 +1156,7 @@ class TerminalApp(QMainWindow):
             if s is self.active_session:
                 self.header_label.setText(self._status_text(s))
                 self._update_script_status_ui(s)
+                self._update_logging_menu_ui(s)
 
     def _update_script_status_ui(self, s: TerminalSession) -> None:
         if s.script_running:
