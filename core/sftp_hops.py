@@ -1,4 +1,7 @@
 from __future__ import annotations
+import os
+import stat
+import posixpath
 import paramiko
 
 def get_hops(session):
@@ -49,6 +52,37 @@ def add_jump_hop(session, host: str, port: int, username: str, password: str):
 def get_active_sftp(session):
     hops = get_hops(session)
     return hops[session.active_hop_index]["sftp"]
+
+def upload_folder(sftp, local_dir: str, remote_dir: str, progress_cb=None) -> None:
+    """Recursively upload local_dir and everything under it to remote_dir over SFTP."""
+    try:
+        sftp.mkdir(remote_dir)
+    except IOError:
+        pass  # remote directory already exists
+    for name in os.listdir(local_dir):
+        local_path = os.path.join(local_dir, name)
+        remote_path = posixpath.join(remote_dir, name)
+        if os.path.isdir(local_path):
+            upload_folder(sftp, local_path, remote_path, progress_cb)
+        else:
+            if progress_cb:
+                progress_cb(local_path)
+            sftp.put(local_path, remote_path)
+
+
+def download_folder(sftp, remote_dir: str, local_dir: str, progress_cb=None) -> None:
+    """Recursively download remote_dir and everything under it to local_dir over SFTP."""
+    os.makedirs(local_dir, exist_ok=True)
+    for entry in sftp.listdir_attr(remote_dir):
+        remote_path = posixpath.join(remote_dir, entry.filename)
+        local_path = os.path.join(local_dir, entry.filename)
+        if stat.S_ISDIR(entry.st_mode):
+            download_folder(sftp, remote_path, local_path, progress_cb)
+        else:
+            if progress_cb:
+                progress_cb(remote_path)
+            sftp.get(remote_path, local_path)
+
 
 def remove_last_hop(session):
     """Close and drop the deepest hop, falling back to the previous one."""

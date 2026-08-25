@@ -1,0 +1,13 @@
+; pause uses seconds.
+pause 2
+
+; mpause uses milliseconds.
+mpause 500
+
+; Semicolons inside quotes are preserved.
+sendln 'show run; include hostname' ; trailing comment is removed
+
+; send does not add a newline.
+send 'partial command'
+sendln ' completed'
+end

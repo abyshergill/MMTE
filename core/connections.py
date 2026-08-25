@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 import queue
 import re
 import socket
@@ -9,20 +10,14 @@ import serial
 
 class BaseConnection:
     label = "Connection"
-
     def start(self, incoming: queue.Queue[str]) -> None:
         raise NotImplementedError
-
     def send(self, data: str) -> None:
         raise NotImplementedError
-
     def close(self) -> None:
         raise NotImplementedError
-
     def resize(self, cols: int, rows: int) -> None:
-        """Default: no-op. Only connections that support PTY resize override this."""
         pass
-
 
 class SSHConnection(BaseConnection):
     label = "SSH"
@@ -38,7 +33,7 @@ class SSHConnection(BaseConnection):
         self.channel: paramiko.Channel | None = None
         self.stop_event = threading.Event()
         self.sftp: paramiko.SFTPClient | None = None
-    
+
     def resize(self, cols: int, rows: int) -> None:
         if not self.channel:
             return
@@ -46,7 +41,7 @@ class SSHConnection(BaseConnection):
             self.channel.resize_pty(width=max(cols, 20), height=max(rows, 5))
         except Exception:
             pass
-        
+
     def start(self, incoming: queue.Queue[str]) -> None:
         self.client = paramiko.SSHClient()
         self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -94,14 +89,12 @@ class SSHConnection(BaseConnection):
         except Exception:
             pass
 
-    
     def get_sftp(self) -> paramiko.SFTPClient:
         if not self.client:
             raise RuntimeError("SSH client is not connected")
         if self.sftp is None:
             self.sftp = self.client.open_sftp()
         return self.sftp
-
 
 class SerialConnection(BaseConnection):
     label = "Serial"

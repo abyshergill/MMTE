@@ -1,6 +1,6 @@
 <div align="center">
 
-# ⚡ Modern Multi Terminal Emulator 
+# ⚡ Modern Multi Terminal Emulator 3.0
 ### & DevOps Sequencer Suite
 
 **The next-generation, cross-platform automation workbench & drop-in Tera Term replacement.**
@@ -48,24 +48,31 @@ Network SREs and hardware developers are constantly forced to choose between **w
 ```text
 modern_multi_terminal/
 │
-├── assets/
-│   └── icon.ico                 # App branding & window taskbar resolution
-├── Scripts/                     # This contain sample scripts
+├── assets/                      # App branding & window taskbar resolution 
+├── Scripts/                     # This contain sample scripts for tega term and python
 │
 ├── core/
+│   ├── __init__.py              
 │   ├── models.py                # Session state tracking & VT100 Textbox mutations
 │   ├── connections.py           # Threaded SSH, Serial, and Telnet socket drivers
 │   ├── script_engine.py         # Legacy .ttl Tokenizer & Python exec() global hooks
+│   ├── qt_theme.py              # Contain theme for the applicaiton
 │   └── presets.py               # Static embedded macro download repository
 │   └── theme.py                 # Contain terminal theme and pallet
 │   └── sftp_hops.py             # for addition sshp hop jumper
 │
 ├── gui/
+│   ├── __init__.py              
 │   ├── dialogs.py               # Modal views (Connection builders, Rename, Help)
 │   └── daw_manager.py           # DAW Playlist Sequencer & Supervisor Engine
 │   └── sftp_dialog.py           # UI for the jumper connection and file transfer between two systems
-│
-├── main.py                      # Application Bootstrap & Tkinter Mainloop
+│   └── terminal_widget.py       # Contain how to render the text on the terminal
+|
+├── tests/                       # Contain test for this applicaiton and readme file.
+├── pytest.ini                   # For testing 
+|
+├── main.py                      # Application Start file
+|
 ├── LICENSE.txt                  # BSD License 3 Clause
 └── requirements.txt
 
@@ -84,11 +91,10 @@ Ensure you have **Python 3.10 or higher** installed on Windows, macOS, or Linux.
 Clone the repository and install the 3 lightweight core dependencies:
 
 ```bash
-git clone [https://github.com/abyshergill/modern_multi_terminal.git](https://github.com/abyshergill/modern_multi_terminal.git)
+git clone https://github.com/abyshergill/modern_multi_terminal.git
 cd modern_multi_terminal
 
 pip install -r requirements.txt
-
 ```
 
 ### 3. Launch

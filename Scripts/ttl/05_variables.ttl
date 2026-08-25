@@ -1,0 +1,13 @@
+; Variables are simple string substitutions.
+; A variable is substituted when the complete argument matches its name.
+
+host = '10.0.0.20'
+port = '/telnet /port=2323'
+command = 'show interfaces'
+
+; The current engine supports variable substitution for command arguments.
+; Use a literal connect string when combining several variable fragments is needed.
+connect '10.0.0.20 /telnet /port=2323'
+wait '>'
+sendln command
+end

@@ -1,0 +1,9 @@
+; Basic Tera Term macro example
+; Semicolon starts a comment outside quotes.
+
+message = 'Hello from TTL'
+sendln message
+
+; End stops the script. Lines after end are not executed.
+end
+sendln 'This line will not run'

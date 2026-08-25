@@ -1,0 +1,10 @@
+; Telnet connection example
+
+connect '192.168.1.50 /telnet /port=23'
+wait 'login:'
+sendln 'admin'
+wait 'Password:'
+sendln 'CHANGE_ME'
+wait '#'
+sendln 'show version'
+end

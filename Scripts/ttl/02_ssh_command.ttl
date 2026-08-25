@@ -1,0 +1,9 @@
+; SSH connection example
+; Replace the placeholders before running.
+
+connect '192.168.1.50 /user=admin /password=CHANGE_ME /port=22'
+wait '$'
+sendln 'show version'
+pause 1
+sendln 'show system uptime'
+end
