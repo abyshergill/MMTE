@@ -41,7 +41,7 @@ Network SREs and hardware developers are constantly forced to choose between **w
 * **Single-Bench Debugger:** Test Row 4 in isolation using the `► Single` button without waiting for Rows 1–3 to execute.
 
 ---
-![](assets/main_window..jpg)
+![](assets/main_window.png)
 
 ## 🏗️ Modular System Architecture
 
