@@ -335,7 +335,8 @@ class TelnetDialog(QDialog):
 
         grid.addWidget(QLabel("Saved profile"), 1, 0)
         self.profile_combo = QComboBox()
-        self.profile_combo.addItems([""] + sorted(self.app.telnet_profile_store.profiles.keys()))
+        telnet_profiles = getattr(getattr(self.app, "telnet_profile_store", None), "profiles", {})
+        self.profile_combo.addItems([""] + sorted(telnet_profiles.keys()))
         self.profile_combo.currentTextChanged.connect(self._load_profile)
         grid.addWidget(self.profile_combo, 1, 1)
 
@@ -370,7 +371,8 @@ class TelnetDialog(QDialog):
     def _load_profile(self, name: str):
         if not name:
             return
-        p = self.app.telnet_profile_store.profiles.get(name, {})
+        telnet_store = getattr(self.app, "telnet_profile_store", None)
+        p = getattr(telnet_store, "profiles", {}).get(name, {})
         self.profile_name.setText(name)
         self.host_entry.setText(p.get("host", ""))
         self.port_entry.setText(str(p.get("port", "23")))

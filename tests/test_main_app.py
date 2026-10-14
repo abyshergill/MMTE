@@ -2,7 +2,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from PyQt6.QtCore import Qt, QEvent
+from PyQt6.QtCore import Qt, QEvent, QEventLoop
 from PyQt6.QtGui import QKeyEvent
 
 import main as main_module
@@ -96,6 +96,58 @@ def test_rename_terminal_by_name(app_window):
     ok = app_window.rename_terminal_by_name(old_name, "Renamed")
     assert ok is True
     assert s.name == "Renamed"
+
+
+def test_run_ai_automation_uses_app_script_engine(app_window):
+    session = app_window.current_session()
+    loop = QEventLoop()
+    results = []
+    started = app_window.run_ai_automation(
+        session,
+        "if terminal_rename('Terminal 1', 'Engine Renamed'):\n"
+        "    print('AI engine ran')\n"
+        "else:\n"
+        "    print('AI engine failed')\n",
+        "AI automation test",
+        on_complete=lambda output: (results.append(output), loop.quit()),
+    )
+    QTimer.singleShot(3000, loop.quit)
+    loop.exec()
+
+    assert started is True
+    assert session.name == "Engine Renamed"
+    assert "AI engine ran" in session.recv_buffer
+    assert results and "AI engine ran" in results[0]
+    assert session.script_running is False
+
+
+def test_ai_terminal_commands_use_script_engine_send(app_window):
+    session = app_window.current_session()
+
+    class CaptureConnection:
+        def send(self, text):
+            session.incoming.put(f"[CAPTURED APP SEND] {text}")
+
+        def close(self):
+            pass
+
+    session.connection = CaptureConnection()
+    session.connected_label = "Test Connection"
+    loop = QEventLoop()
+    app_window.ai_panel.run_ai_script_sequence(["echo APP_ENGINE_SEND_OK"], session=session)
+
+    def check_finished():
+        if "[CAPTURED APP SEND] echo APP_ENGINE_SEND_OK" in session.recv_buffer and not session.script_running:
+            loop.quit()
+        else:
+            QTimer.singleShot(20, check_finished)
+
+    QTimer.singleShot(0, check_finished)
+    QTimer.singleShot(3000, loop.quit)
+    loop.exec()
+
+    assert "[CAPTURED APP SEND] echo APP_ENGINE_SEND_OK\n" in session.recv_buffer
+    assert session.script_running is False
 
 
 def test_close_session_direct_selects_previous_session(app_window):

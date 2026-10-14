@@ -28,6 +28,9 @@ class RecordingSession:
     def send(self, data):
         self.sent.append(data)
 
+    def script_checkpoint(self):
+        pass
+
     def wait_for(self, pattern, timeout=60.0, case_sensitive=True):
         self.log_calls.append(("wait_for", pattern))
         return self._wait_for_result
@@ -158,6 +161,18 @@ def test_script_wait_with_pattern_delegates_to_session(tmp_path, fake_app):
     script.write_text('wait("ready")\n', encoding="utf-8")
     execute_python_script_sync(session, str(script))
     assert ("wait_for", "ready") in session.log_calls
+
+
+def test_script_connect_telnet_waits_until_app_session_is_connected(tmp_path, fake_app):
+    session = RecordingSession(fake_app)
+    script = tmp_path / "connect.py"
+    script.write_text('connect_telnet("127.0.0.1", port=2323)\n', encoding="utf-8")
+
+    execute_python_script_sync(session, str(script))
+
+    assert fake_app.connect_calls
+    assert session.connection is fake_app.connect_calls[0][1]
+    assert session.connected_label == "Telnet 127.0.0.1"
 
 
 def test_script_log_on_and_bare_log_off(tmp_path, fake_app):

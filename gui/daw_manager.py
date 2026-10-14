@@ -276,7 +276,7 @@ class MultiScriptDialog(QDialog):
 
     def _current_running_session(self):
         for item in self.playlist:
-            if item.target_session.script_running:
+            if getattr(item.target_session, "script_running", False):
                 return item.target_session
         return None
 

@@ -154,6 +154,20 @@ def execute_python_script_sync(session: "TerminalSession", path: str):
         if delay: sleep_checkpoint(delay)
         cur_sess[0].send(str(text) + ("\n" if newline else ""))
 
+    def wait_connected(timeout: float = 30.0) -> bool:
+        """Wait for the app's current terminal connection attempt to succeed."""
+        deadline = time.monotonic() + float(timeout)
+        while True:
+            cur_sess[0].script_checkpoint()
+            active_session = cur_sess[0]
+            if active_session.connection is None:
+                raise ConnectionError(f"{active_session.name} is not connected")
+            if active_session.connected_label != "Disconnected":
+                return True
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Timed out connecting {active_session.name}")
+            time.sleep(0.05)
+
     def print_to_terminal(*args, sep=" ", end="\n"):
         text = sep.join(str(a) for a in args) + end
         text = text.replace("\r\n", "\n").replace("\n", "\r\n")
@@ -165,22 +179,8 @@ def execute_python_script_sync(session: "TerminalSession", path: str):
             return True
         elif isinstance(pattern_or_seconds, str):
             pattern = pattern_or_seconds
-            deadline = time.time() + timeout
-            while time.time() < deadline:
-                cur_sess[0].script_checkpoint()
-                text = _run_ui_action(
-                    lambda: cur_sess[0].terminal.toPlainText()[-2000:],
-                    #lambda: cur_sess[0].terminal.toPlainText(),
-                    timeout=5.0,
-                )
-                if not case_sensitive:
-                    text = text.lower()
-                    pattern_check = pattern.lower()
-                else:
-                    pattern_check = pattern
-                if pattern_check in text:
-                    return True
-                time.sleep(0.15)
+            if cur_sess[0].wait_for(pattern, timeout=timeout, case_sensitive=case_sensitive):
+                return True
             cur_sess[0].incoming.put(f"\r\n[wait timed out for: '{pattern}']\r\n")
             return False
         else:
@@ -265,17 +265,17 @@ def execute_python_script_sync(session: "TerminalSession", path: str):
     def connect_ssh(host, username, password, port=22):
         conn = SSHConnection(host=host, username=username, password=password, port=port, look_for_keys=False, allow_agent=False)
         _run_ui_action(lambda: session.app.connect_session(cur_sess[0], conn, f"SSH {host}"))
-        time.sleep(1.0)
+        wait_connected()
 
     def connect_serial(port, baudrate, bytesize=8, parity="N", stopbits=1.0):
         conn = SerialConnection(port=port, baudrate=baudrate, bytesize=bytesize, parity=parity, stopbits=stopbits)
         _run_ui_action(lambda: session.app.connect_session(cur_sess[0], conn, f"Serial {port} @ {baudrate}"))
-        time.sleep(1.0)
+        wait_connected()
 
     def connect_telnet(host, port=23):
         conn = TelnetConnection(host=host, port=port)
         _run_ui_action(lambda: session.app.connect_session(cur_sess[0], conn, f"Telnet {host}"))
-        time.sleep(1.0)
+        wait_connected()
 
     def log_on(log_path: str):
         p = Path(log_path)
@@ -316,7 +316,10 @@ def execute_python_script_sync(session: "TerminalSession", path: str):
         _run_ui_action(lambda: session.app.close_session_by_name(target_name))
 
     def terminal_rename(current_name: str, new_name: str):
-        _run_ui_action(lambda: session.app.rename_terminal_by_name(current_name, new_name))
+        return _run_ui_action(lambda: session.app.rename_terminal_by_name(current_name, new_name))
+
+    def terminal_list() -> list[str]:
+        return _run_ui_action(lambda: [terminal.name for terminal in session.app.sessions])
 
     def terminal_select(name: str):
         target_s = _run_ui_action(lambda: session.app.select_session_by_name(name))
@@ -358,11 +361,12 @@ def execute_python_script_sync(session: "TerminalSession", path: str):
         "__file__": path, "__name__": "__automation__",
         "send": send, "print": print_to_terminal,
         "connect_ssh": connect_ssh, "connect_serial": connect_serial, "connect_telnet": connect_telnet,
-        "wait": wait, "sleep": sleep_checkpoint,
+        "wait": wait, "sleep": sleep_checkpoint, "wait_connected": wait_connected,
         "alert": alert, "input": input,
         "log_on": log_on, "log_off": _LogOffCallable(),
         "terminal_new": terminal_new, "terminal_close": terminal_close,
         "terminal_rename": terminal_rename,
+        "terminal_list": terminal_list,
         "terminal_select": terminal_select, "select_terminal": terminal_select,
         "run_script": run_script,
         "terminal_name": DynamicTerminalName()

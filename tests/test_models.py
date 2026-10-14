@@ -22,6 +22,18 @@ def test_recv_buffer_is_capped(terminal_session):
     assert len(terminal_session.recv_buffer) <= 250_000
 
 
+def test_recent_output_includes_terminal_scrollback(terminal_session):
+    terminal_session.append("\r\n".join(f"log-line-{index}" for index in range(40)))
+    output = terminal_session.recent_output()
+    assert "log-line-0" in output
+    assert "log-line-39" in output
+
+
+def test_recent_output_respects_character_limit(terminal_session):
+    terminal_session.append("x" * 100)
+    assert len(terminal_session.recent_output(12)) == 12
+
+
 def test_render_is_noop_after_widget_deleted(terminal_session):
     terminal_session.terminal.deleteLater()
     # Force immediate C++ deletion isn't guaranteed synchronously in tests,

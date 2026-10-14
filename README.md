@@ -104,6 +104,16 @@ python main.py
 
 ```
 
+### Local LLM in the AI Test Engineer
+
+Open **AI → LLM Settings**, choose **Ollama (Local)**, and set the model name to an installed Ollama model (for example, `llama3.1` or `qwen2.5:7b`). The default Ollama-compatible endpoint is `http://localhost:11434/v1`. OpenAI-compatible local servers can use their own base URL, such as `http://localhost:1234/v1`; Ollama's native endpoint ending in `/api/chat` is also accepted.
+
+The AI panel streams answers and its **Stop** button cancels an in-progress request. With **Attach Active Terminal Output Buffer** enabled, each prompt includes recent scrollback from the selected embedded session. The assistant retrieves relevant app and project instructions before answering. Advice-only questions do not receive mutation tools. Explicit requests to create/rename/connect tabs or send terminal input use application tools and the built-in automation engine; they do not launch macOS Terminal or another shell.
+
+The app automatically creates a read-only **Modern Multi Terminal (Built-in)** RAG memory and selects it by default. It documents the actual app/session architecture, script engine, connection requirements, terminal output/logging, DAW playlist, SFTP hops, and AI tool flow. It is combined with a selected project RAG, not replaced by it. The Ollama embedding model is `qwen3-embedding:0.6b`; embeddings are cached and relevant passages are selected per query. If Ollama's embedding endpoint is unavailable, keyword retrieval is used. The built-in memory is visible but protected from edits in **Manage Project RAG Memories**.
+
+The selected Ollama chat model receives structured application tools (`create_terminal`, `rename_terminal`, `connect_terminal`, `send_terminal`, `read_terminal`, and `list_terminals`) plus current tab/connection state and retrieved app-specific knowledge. Tool calls are validated, executed by the existing Python script engine, and actual app output is sent back to Ollama for its final response. Mutating tools are only exposed when the current user message requests the corresponding operation. Qwen models that return JSON tool requests as message content instead of native `tool_calls` are also supported; repeated identical actions are not run twice. Configure the response model and Ollama base URL under **AI → LLM Settings**; the embedding model is configured in the built-in RAG memory.
+
 ---
 
 ## 📜 Automation Syntax Reference

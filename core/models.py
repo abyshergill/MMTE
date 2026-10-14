@@ -276,6 +276,24 @@ class TerminalSession:
         with self.recv_condition:
             self.recv_buffer = ""
 
+    def recent_output(self, max_chars: int = 6000) -> str:
+        """Return sanitized recent terminal scrollback, including history rows."""
+        if max_chars <= 0:
+            return ""
+        try:
+            rows = list(self.screen.history.top)
+            rows.extend(self.screen.buffer[y] for y in range(self.rows))
+            text = "\n".join(
+                "".join(row[x].data or " " for x in range(self.cols)).rstrip()
+                for row in rows
+            ).rstrip()
+            return text[-max_chars:]
+        except Exception:
+            try:
+                return self.terminal.toPlainText()[-max_chars:]
+            except Exception:
+                return ""
+
     def clear_screen(self) -> None:
         """Fully clear the terminal. Clearing only the QTextEdit widget is not
         enough: render() always repaints from self.screen's buffer, so the
