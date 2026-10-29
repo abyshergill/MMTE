@@ -80,7 +80,7 @@ class SamplesDialog(QDialog):
         more_layout.addWidget(lbl_more_desc, 1, 0)
         more_btn = QPushButton("\U0001F310 More Scripts")
         more_btn.setStyleSheet("QPushButton { background-color: #7656b7; color: white; }")
-        more_btn.clicked.connect(lambda: webbrowser.open("https://github.com/abyshergill/mmte/scripts/"))
+        more_btn.clicked.connect(lambda: webbrowser.open("https://github.com/abyshergill/modern_multi_terminal/tree/main/Scripts"))
         more_layout.addWidget(more_btn, 0, 1, 2, 1)
         content_layout.addWidget(more_frame)
 
@@ -443,12 +443,21 @@ class OperatorGateDialog(QDialog):
 
         self.show()
 
-    def closeEvent(self, event):
-        # Mirrors the original WM_DELETE_WINDOW -> ABORT behavior.
+    def _release_with_abort(self):
         if not self.event_lock.is_set():
             self.decision_holder["choice"] = "ABORT"
             self.event_lock.set()
+
+    def closeEvent(self, event):
+        # Mirrors the original WM_DELETE_WINDOW -> ABORT behavior.
+        self._release_with_abort()
         event.accept()
+
+    def reject(self):
+        # Escape key: QDialog.reject() hides the dialog WITHOUT a closeEvent, which would
+        # leave the playlist supervisor thread waiting forever on event_lock.
+        self._release_with_abort()
+        super().reject()
 
     def _choose(self, action: str):
         self.decision_holder["choice"] = action

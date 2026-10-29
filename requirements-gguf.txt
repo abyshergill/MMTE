@@ -1,0 +1,4 @@
+# Optional: run a local .gguf model inside the app (Provider: "Local GGUF File").
+# CPU build:   pip install -r requirements-gguf.txt
+# GPU builds:  see https://github.com/abetlen/llama-cpp-python#installation
+llama-cpp-python>=0.3.0

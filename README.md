@@ -14,7 +14,7 @@
 
 </div>
 
-## 📖 Overview
+## Overview
 
 Network SREs and hardware developers are constantly forced to choose between **writing modern Python automation** and **supporting legacy Tera Term (`.ttl`) infrastructure**. 
 
@@ -24,17 +24,17 @@ Network SREs and hardware developers are constantly forced to choose between **w
 
 ## ✨ Engineering Highlights
 
-### 🔌 Tri-Protocol Connection Engine
+### Tri-Protocol Connection Engine
 * **SSH-2:** Fully allocated PTY interactive shell streams powered by `paramiko`.
 * **Hardware Serial:** Native `pyserial` bridge with live hardware discovery *(displays friendly driver names like `CP210x USB to UART Bridge (COM6)` rather than raw system paths)*.
 * **Telnet:** Raw TCP socket engine featuring an automated background regex scrubber that strips binary `IAC (0xFF)` negotiation spam.
 
-### 🧠 Sane VT100 Stream Caret 
+###  Sane VT100 Stream Caret 
 * **True Stream Emulation:** Incoming packets insert strictly at the local green caret position (`"insert"`), never forcibly snapping the user's cursor to the bottom of the screen mid-sentence.
 * **Anti-Bell Trap:** Silently vaporizes rogue Linux `\x07 (BEL)` audio packets before they can corrupt screen geometry or sniffer buffers.
 * **Zero-Flicker Layout:** Fully decoupled widget memory arrays; tabs and scroll views mutate existing Tkinter properties rather than running `.destroy()` redraw loops.
 
-### 🎛️ DAW Multi-Script Sequencer
+### DAW Multi-Script Sequencer
 * **Session Tab Routing:** Assign Row 1 (`login.ttl`) to *Terminal A*, and Row 2 (`scrape_routing_table.py`) to *Terminal B*. The GUI auto-flips tabs to follow active execution.
 * **Smart Prompt Sniffer:** Background regex engine hunts for prompt signifiers (`$`, `#`, `>`) to graduate queue steps hands-free.
 * **The Operator Gate:** If a script times out or throws an exception, execution freezes and triggers an OS audio alert, offering the engineer three choices: `[+15s Extend]`, `[Force Pass]`, or `[Abort]`.
@@ -43,44 +43,9 @@ Network SREs and hardware developers are constantly forced to choose between **w
 ---
 ![](assets/main_window.png)
 
-## 🏗️ Modular System Architecture
-
-```text
-modern_multi_terminal/
-│
-├── assets/                      # App branding & window taskbar resolution 
-├── Scripts/                     # This contain sample scripts for tega term and python
-│
-├── core/
-│   ├── __init__.py              
-│   ├── models.py                # Session state tracking & VT100 Textbox mutations
-│   ├── connections.py           # Threaded SSH, Serial, and Telnet socket drivers
-│   ├── script_engine.py         # Legacy .ttl Tokenizer & Python exec() global hooks
-│   ├── qt_theme.py              # Contain theme for the applicaiton
-│   └── presets.py               # Static embedded macro download repository
-│   └── theme.py                 # Contain terminal theme and pallet
-│   └── sftp_hops.py             # for addition sshp hop jumper
-│
-├── gui/
-│   ├── __init__.py              
-│   ├── dialogs.py               # Modal views (Connection builders, Rename, Help)
-│   └── daw_manager.py           # DAW Playlist Sequencer & Supervisor Engine
-│   └── sftp_dialog.py           # UI for the jumper connection and file transfer between two systems
-│   └── terminal_widget.py       # Contain how to render the text on the terminal
-|
-├── tests/                       # Contain test for this applicaiton and readme file.
-├── pytest.ini                   # For testing 
-|
-├── main.py                      # Application Start file
-|
-├── LICENSE.txt                  # BSD License 3 Clause
-└── requirements.txt
-
-```
-
 ---
 
-## 🚀 Quickstart Guide
+## Quickstart Guide
 
 ### 1. Requirements
 
@@ -91,8 +56,8 @@ Ensure you have **Python 3.10 or higher** installed on Windows, macOS, or Linux.
 Clone the repository and install the 3 lightweight core dependencies:
 
 ```bash
-git clone https://github.com/abyshergill/modern_multi_terminal.git
-cd modern_multi_terminal
+git clone https://github.com/abyshergill/MMTE
+cd MMTE
 
 pip install -r requirements.txt
 ```
@@ -116,7 +81,7 @@ The selected Ollama chat model receives structured application tools (`create_te
 
 ---
 
-## 📜 Automation Syntax Reference
+## Automation Syntax Reference
 
 The suite natively parses both formats side-by-side. You can drag both file types into the same Multi-Script playlist.
 
@@ -173,7 +138,7 @@ print("--- Automated Diagnostic Complete ---")
 
 ---
 
-## 📂 Local System Directories
+## Local System Directories
 
 The emulator safely isolates its footprint to the user's home directory:
 
@@ -182,7 +147,7 @@ The emulator safely isolates its footprint to the user's home directory:
 
 ---
 
-## 🛡️ License & Contact
+## License & Contact
 
 Distributed under the **BSD 3-Clause License**. See `LICENSE` for more information.
 

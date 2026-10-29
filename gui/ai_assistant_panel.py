@@ -20,6 +20,9 @@ from PyQt6.QtWidgets import (
 )
 
 from core.llm_config import LLMConfigManager
+from core.llm.errors import LLMError
+from core.llm.providers import is_cloud
+from core.redact import redact_secrets
 from core.llm_chat import APP_TOOL_DEFINITIONS, chat_with_app_tools, stream_chat
 from core.rag_manager import RAGMemoryManager
 from core.application_knowledge import APPLICATION_MEMORY_NAME
@@ -49,6 +52,7 @@ class AIAssistantPanel(QWidget):
         self._cancel_event: threading.Event | None = None
         self._active_response = None
         self._chat_history: list[dict[str, str]] = []
+        self._streamed_response = ""  # read by "Run in Terminal" before any query has been sent
         self._thinking_frame = 0
         self._request_failed = False
         self._discard_current_response = False
@@ -1027,6 +1031,8 @@ class AIAssistantPanel(QWidget):
                         terminal_context = request_session.terminal.toPlainText()[-6000:]
                     except Exception:
                         pass
+            if terminal_context and self._should_redact():
+                terminal_context = redact_secrets(terminal_context)
             if terminal_context:
                 self.chat_display.append(
                     f"<font color='#565f89'><i>[Attached {len(terminal_context)} characters from {html.escape(self._request_target_name)}]</i></font>"
@@ -1083,6 +1089,9 @@ class AIAssistantPanel(QWidget):
         self._auto_run_requested = auto_run_requested
         self._request_session = request_session
         self._chat_history.append({"role": "user", "content": query})
+        # Keep the in-memory conversation bounded; core.llm trims again to the model window.
+        if len(self._chat_history) > self.MAX_HISTORY_MESSAGES:
+            del self._chat_history[: len(self._chat_history) - self.MAX_HISTORY_MESSAGES]
 
         def worker():
             try:
@@ -1094,7 +1103,7 @@ class AIAssistantPanel(QWidget):
                         context, mode = retrieve_relevant(
                             memory_name,
                             query,
-                            str(llm_info.get("endpoint_url") or "http://127.0.0.1:11434"),
+                            self._embedding_endpoint(llm_info),
                             top_k=5 if memory_name == APPLICATION_MEMORY_NAME else 3,
                         )
                     else:
@@ -1215,6 +1224,30 @@ class AIAssistantPanel(QWidget):
         self.chat_display.append(text)
         self.send_btn.setEnabled(True)
         self.send_btn.setText("Send Query")
+
+    MAX_HISTORY_MESSAGES = 40
+
+    def _should_redact(self) -> bool:
+        """Mask credentials only when the prompt would leave this machine/LAN."""
+        config = getattr(self.llm_cfg, "config", {}) or {}
+        try:
+            return bool(config.get("redact_secrets", True)) and is_cloud(config)
+        except Exception:
+            return True
+
+    @staticmethod
+    def _embedding_endpoint(llm_info: dict) -> str:
+        """Server used for RAG embeddings (Ollama), independent of the chat provider.
+
+        A hosted chat provider's URL (api.openai.com ...) cannot serve Ollama embeddings.
+        """
+        explicit = str(llm_info.get("embedding_endpoint_url") or "").strip()
+        if explicit:
+            return explicit
+        chat_url = str(llm_info.get("endpoint_url") or "").strip()
+        if ":11434" in chat_url:
+            return chat_url
+        return "http://127.0.0.1:11434"
 
     def _handle_error(self, err_msg: str):
         self._request_failed = True

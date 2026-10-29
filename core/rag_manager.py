@@ -1,10 +1,16 @@
-import json
 import hashlib
+import json
 import math
+import os
+import re
+import tempfile
+from collections import Counter
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
 
 import requests
+
+from core.llm import embeddings as _embeddings
+from core.llm.errors import LLMError
 
 from core.application_knowledge import (
     APPLICATION_EMBEDDING_MODEL,
@@ -25,6 +31,38 @@ AVAILABLE_EMBEDDING_MODELS = [
 ]
 
 
+CHUNK_CHARS = 1200
+CHUNK_OVERLAP = 150
+_TOKEN_RE = re.compile(r"[a-z0-9_]+")
+_STOP_WORDS = frozenset(
+    "the and for are but not you all can had her was one our out has his how its may new now see two way who "
+    "did get let say she too use with this that from have what when where which does into your about".split()
+)
+
+
+def chunk_text(text: str, max_chars: int = CHUNK_CHARS, overlap: int = CHUNK_OVERLAP) -> list[str]:
+    """Split text into retrieval-sized pieces, preferring paragraph/line boundaries."""
+    text = text.strip()
+    if len(text) <= max_chars:
+        return [text] if text else []
+    chunks: list[str] = []
+    start = 0
+    while start < len(text):
+        end = min(start + max_chars, len(text))
+        if end < len(text):
+            window = text[start:end]
+            cut = max(window.rfind("\n\n"), window.rfind("\n"), window.rfind(". "))
+            if cut > max_chars // 2:
+                end = start + cut + 1
+        piece = text[start:end].strip()
+        if piece:
+            chunks.append(piece)
+        if end >= len(text):
+            break
+        start = max(end - overlap, start + 1)
+    return chunks
+
+
 class RAGMemoryManager:
     def __init__(self, path: Path = RAG_FILE):
         self.path = path
@@ -42,9 +80,19 @@ class RAGMemoryManager:
             return {}
 
     def save(self) -> None:
+        """Write atomically so a crash mid-write cannot corrupt every saved memory."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("w", encoding="utf-8") as f:
-            json.dump(self.memories, f, indent=2)
+        fd, tmp_name = tempfile.mkstemp(dir=str(self.path.parent), prefix=".rag.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(self.memories, f, indent=2)
+            os.replace(tmp_name, self.path)
+        except BaseException:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
 
     def create_or_update(
         self,
@@ -56,6 +104,9 @@ class RAGMemoryManager:
     ) -> dict:
         if new_file_paths is None:
             new_file_paths = []
+        name = name.strip()
+        if name == APPLICATION_MEMORY_NAME:
+            raise ValueError(f"'{APPLICATION_MEMORY_NAME}' is the built-in application guide and cannot be modified.")
 
         memory = self.memories.get(
             name,
@@ -82,9 +133,10 @@ class RAGMemoryManager:
             if path_obj.exists() and fpath not in memory["file_sources"]:
                 try:
                     content = path_obj.read_text(encoding="utf-8", errors="ignore")
-                    memory["text_entries"].append(
-                        f"--- FILE: {path_obj.name} ---\n{content}"
-                    )
+                    pieces = chunk_text(content) or [""]
+                    for number, piece in enumerate(pieces, start=1):
+                        suffix = f" (part {number}/{len(pieces)})" if len(pieces) > 1 else ""
+                        memory["text_entries"].append(f"--- FILE: {path_obj.name}{suffix} ---\n{piece}")
                     memory["file_sources"].append(fpath)
                 except Exception as e:
                     print(f"Error reading file {fpath}: {e}")
@@ -94,6 +146,8 @@ class RAGMemoryManager:
         return memory
 
     def delete(self, name: str) -> None:
+        if name == APPLICATION_MEMORY_NAME:
+            return  # the built-in guide is re-created on start-up anyway; never delete it
         self.memories.pop(name, None)
         self.save()
 
@@ -122,37 +176,14 @@ class RAGMemoryManager:
 
     @staticmethod
     def _ollama_embed_url(endpoint_url: str) -> str:
-        endpoint = (endpoint_url or "http://localhost:11434").strip().rstrip("/")
-        parsed = urlsplit(endpoint)
-        path = parsed.path.rstrip("/")
-        for suffix in ("/api/chat", "/chat/completions", "/embeddings", "/v1"):
-            if path.endswith(suffix):
-                path = path[: -len(suffix)]
-                break
-        return urlunsplit(parsed._replace(path=f"{path}/api/embed"))
+        return _embeddings.ollama_embed_url(endpoint_url)
 
     @staticmethod
     def _embedding_model_name(model_name: str | None) -> str:
-        model = (model_name or APPLICATION_EMBEDDING_MODEL).strip()
-        if model.startswith("ollama/"):
-            return model[len("ollama/"):]
-        return model
+        return _embeddings.split_model(model_name or APPLICATION_EMBEDDING_MODEL)[1]
 
     def _embed_texts(self, texts: list[str], endpoint_url: str, model_name: str) -> list[list[float]]:
-        if not texts:
-            return []
-        response = requests.post(
-            self._ollama_embed_url(endpoint_url),
-            json={"model": self._embedding_model_name(model_name), "input": texts},
-            headers={"Content-Type": "application/json"},
-            timeout=(5, 90),
-        )
-        response.raise_for_status()
-        data = response.json()
-        vectors = data.get("embeddings")
-        if not isinstance(vectors, list) or len(vectors) != len(texts):
-            raise ValueError("Ollama returned an unexpected embedding count")
-        return [[float(value) for value in vector] for vector in vectors]
+        return _embeddings.embed_texts(texts, endpoint_url, model_name)
 
     @staticmethod
     def _content_hash(entries: list[str], model_name: str) -> str:
@@ -171,14 +202,30 @@ class RAGMemoryManager:
         return dot / (left_norm * right_norm)
 
     @staticmethod
+    def _tokens(text: str) -> list[str]:
+        return [t for t in _TOKEN_RE.findall(text.lower()) if len(t) > 2 and t not in _STOP_WORDS]
+
+    @staticmethod
     def _lexical_scores(query: str, entries: list[str]) -> list[float]:
-        query_terms = {word.lower() for word in query.split() if len(word) > 2}
-        if not query_terms:
+        """BM25 ranking; the offline fallback when no embedding server is reachable."""
+        query_terms = set(RAGMemoryManager._tokens(query))
+        if not query_terms or not entries:
             return [0.0] * len(entries)
+        docs = [Counter(RAGMemoryManager._tokens(entry)) for entry in entries]
+        lengths = [sum(doc.values()) for doc in docs]
+        avg_len = (sum(lengths) / len(lengths)) or 1.0
+        count = len(entries)
         scores = []
-        for entry in entries:
-            terms = {word.lower() for word in entry.split() if len(word) > 2}
-            scores.append(len(query_terms & terms) / math.sqrt(len(query_terms) * max(len(terms), 1)))
+        for doc, length in zip(docs, lengths):
+            score = 0.0
+            for term in query_terms:
+                freq = doc.get(term, 0)
+                if not freq:
+                    continue
+                containing = sum(1 for other in docs if term in other)
+                idf = math.log(1 + (count - containing + 0.5) / (containing + 0.5))
+                score += idf * (freq * 2.2) / (freq + 1.2 * (0.25 + 0.75 * length / avg_len))
+            scores.append(score)
         return scores
 
     def retrieve_relevant(
@@ -199,7 +246,7 @@ class RAGMemoryManager:
         content_hash = self._content_hash(entries, model_name)
         vectors = memory.get("embeddings")
         vector_model = memory.get("embedding_hash")
-        mode = "Ollama embeddings"
+        mode = f"{_embeddings.provider_label(model_name)} embeddings"
         try:
             if vector_model != content_hash or not isinstance(vectors, list) or len(vectors) != len(entries):
                 vectors = self._embed_texts(entries, endpoint_url, model_name)
@@ -209,7 +256,7 @@ class RAGMemoryManager:
                 self.save()
             query_vector = self._embed_texts([query], endpoint_url, model_name)[0]
             scores = [self._cosine_similarity(query_vector, vector) for vector in vectors]
-        except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+        except (requests.RequestException, LLMError, ValueError, KeyError, TypeError) as exc:
             mode = f"keyword fallback ({type(exc).__name__})"
             scores = self._lexical_scores(query, entries)
 

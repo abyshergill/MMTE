@@ -1,20 +1,16 @@
+# Runtime dependencies
 bcrypt==5.0.0
 cffi==2.1.1
 cryptography==50.0.0
-iniconfig==2.3.0
 invoke==3.0.3
-packaging==26.3
 paramiko==5.0.0
-pluggy==1.6.0
 pycparser==3.0
 Pygments==2.20.0
 PyNaCl==1.6.2
 PyQt6==6.11.0
 PyQt6-Qt6==6.11.1
 PyQt6_sip==13.12.0
-requests>=2.31,<3
 pyserial==3.5
 pyte==0.8.2
-pytest==9.1.1
-pytest-mock==3.15.1
+requests>=2.31,<3
 wcwidth==0.8.2

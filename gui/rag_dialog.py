@@ -200,13 +200,17 @@ class RAGManagementDialog(QDialog):
             )
             return
 
-        self.rag_mgr.create_or_update(
-            name=name,
-            embedding_model=model,
-            assigned_job=job,
-            new_text=new_text,
-            new_file_paths=self.pending_files,
-        )
+        try:
+            self.rag_mgr.create_or_update(
+                name=name,
+                embedding_model=model,
+                assigned_job=job,
+                new_text=new_text,
+                new_file_paths=self.pending_files,
+            )
+        except ValueError as exc:  # e.g. the reserved built-in memory name
+            QMessageBox.warning(self, "Cannot save memory", str(exc))
+            return
 
         self._refresh_list()
         self.context_edit.clear()

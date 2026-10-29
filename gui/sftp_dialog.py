@@ -182,7 +182,7 @@ class SFTPBrowserDialog(QDialog):
                 self.current_path = home
                 self.app.after(0, self._refresh)
             except Exception as exc:
-                self.app.after(0, lambda: self._set_status(f"SFTP connect failed: {exc}"))
+                self.app.after(0, lambda e=exc: self._set_status(f"SFTP connect failed: {e}"))
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_hop_selected(self, label):
@@ -202,7 +202,7 @@ class SFTPBrowserDialog(QDialog):
                 self.current_path = home
                 self.app.after(0, self._refresh)
             except Exception as exc:
-                self.app.after(0, lambda: self._set_status(f"Failed to switch hop: {exc}"))
+                self.app.after(0, lambda e=exc: self._set_status(f"Failed to switch hop: {e}"))
         threading.Thread(target=worker, daemon=True).start()
 
     def _add_hop_dialog(self):
@@ -242,7 +242,7 @@ class SFTPBrowserDialog(QDialog):
                 self.current_path = home
                 self.app.after(0, self._refresh)
             except Exception as exc:
-                self.app.after(0, lambda: self._set_status(f"Failed to reload after removing hop: {exc}"))
+                self.app.after(0, lambda e=exc: self._set_status(f"Failed to reload after removing hop: {e}"))
         threading.Thread(target=worker, daemon=True).start()
 
     def _navigate_to(self, path):
@@ -342,7 +342,7 @@ class SFTPBrowserDialog(QDialog):
             try:
                 sftp = get_active_sftp(self.session)
             except Exception as exc:
-                self.app.after(0, lambda: self._set_status(f"SFTP unavailable: {exc}"))
+                self.app.after(0, lambda e=exc: self._set_status(f"SFTP unavailable: {e}"))
                 return
             for lp in local_paths:
                 name = Path(lp).name
@@ -374,7 +374,7 @@ class SFTPBrowserDialog(QDialog):
                 sftp.get(remote_path, local_path)
                 self.app.after(0, lambda: self._set_status(f"Downloaded {name} -> {local_path}"))
             except Exception as exc:
-                self.app.after(0, lambda: self._set_status(f"Download failed: {exc}"))
+                self.app.after(0, lambda e=exc: self._set_status(f"Download failed: {e}"))
         threading.Thread(target=worker, daemon=True).start()
 
     def _upload_folder_dialog(self):
@@ -389,7 +389,7 @@ class SFTPBrowserDialog(QDialog):
             try:
                 sftp = get_active_sftp(self.session)
             except Exception as exc:
-                self.app.after(0, lambda: self._set_status(f"SFTP unavailable: {exc}"))
+                self.app.after(0, lambda e=exc: self._set_status(f"SFTP unavailable: {e}"))
                 return
             try:
                 self.app.after(0, lambda: self._set_status(f"Uploading folder {folder_name}..."))
@@ -401,7 +401,7 @@ class SFTPBrowserDialog(QDialog):
                 self.app.after(0, lambda: self._set_status(f"Folder '{folder_name}' uploaded"))
                 self.app.after(0, self._refresh)
             except Exception as exc:
-                self.app.after(0, lambda: self._set_status(f"Folder upload failed: {exc}"))
+                self.app.after(0, lambda e=exc: self._set_status(f"Folder upload failed: {e}"))
         threading.Thread(target=worker, daemon=True).start()
 
     def _download_folder(self):
@@ -419,7 +419,7 @@ class SFTPBrowserDialog(QDialog):
             try:
                 sftp = get_active_sftp(self.session)
             except Exception as exc:
-                self.app.after(0, lambda: self._set_status(f"SFTP unavailable: {exc}"))
+                self.app.after(0, lambda e=exc: self._set_status(f"SFTP unavailable: {e}"))
                 return
             try:
                 self.app.after(0, lambda: self._set_status(f"Downloading folder {name}..."))
@@ -430,7 +430,7 @@ class SFTPBrowserDialog(QDialog):
                 download_folder(sftp, remote_path, local_path, progress_cb=progress)
                 self.app.after(0, lambda: self._set_status(f"Folder downloaded to {local_path}"))
             except Exception as exc:
-                self.app.after(0, lambda: self._set_status(f"Folder download failed: {exc}"))
+                self.app.after(0, lambda e=exc: self._set_status(f"Folder download failed: {e}"))
         threading.Thread(target=worker, daemon=True).start()
 
     def _delete_selected(self):
@@ -451,5 +451,5 @@ class SFTPBrowserDialog(QDialog):
                 self.app.after(0, lambda: self._set_status(f"Deleted {name}"))
                 self.app.after(0, self._refresh)
             except Exception as exc:
-                self.app.after(0, lambda: self._set_status(f"Delete failed: {exc}"))
+                self.app.after(0, lambda e=exc: self._set_status(f"Delete failed: {e}"))
         threading.Thread(target=worker, daemon=True).start()

@@ -245,6 +245,9 @@ class MultiScriptDialog(QDialog):
         self.show()
 
     def _add_files(self):
+        if not self.app.sessions:
+            QMessageBox.information(self, "No terminal", "Open a terminal tab first; scripts run inside a terminal.")
+            return
         default_sess = self.app.active_session if (self.app.active_session in self.app.sessions) else self.app.sessions[0]
         paths, _ = QFileDialog.getOpenFileNames(
             self, "Select Scripts", "", "Scripts (*.ttl *.py);;All Files (*.*)"
@@ -340,7 +343,7 @@ class MultiScriptDialog(QDialog):
 
             session_combo = QComboBox()
             session_combo.addItems(session_names)
-            current_name = item.target_session.name if item.target_session in self.app.sessions else session_names[0]
+            current_name = item.target_session.name if item.target_session in self.app.sessions else (session_names[0] if session_names else "")
             session_combo.setCurrentText(current_name)
             session_combo.setFixedWidth(115)
             session_combo.currentTextChanged.connect(lambda val, i=item: self._route_session(i, val))
@@ -462,6 +465,10 @@ class MultiScriptDialog(QDialog):
         self.supervisor.start()
 
     def _launch_all(self):
+        if self.supervisor and self.supervisor.isRunning():
+            return  # a second supervisor would run the same playlist concurrently
+        if not self.playlist:
+            return
         self.supervisor = PlaylistSupervisorThread(
             self.app, self.playlist, self.beep_checkbox.isChecked(),
             self._update_live_ui, self._on_suite_success,

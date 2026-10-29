@@ -5,9 +5,7 @@ import threading
 import time
 import re
 from pathlib import Path
-from PyQt6.QtWidgets import QMessageBox
 from core.connections import SSHConnection, SerialConnection, TelnetConnection
-from PyQt6.QtWidgets import QMessageBox, QInputDialog, QLineEdit
 from PyQt6.QtWidgets import QMessageBox, QInputDialog, QLineEdit, QDialog
 
 from typing import TYPE_CHECKING
@@ -133,7 +131,8 @@ def execute_python_script_sync(session: "TerminalSession", path: str):
             finally:
                 done.set()
         session.app.after(0, runner)
-        done.wait(timeout=timeout)
+        if not done.wait(timeout=timeout):
+            raise TimeoutError(f"The application did not complete the requested action within {timeout:g}s")
         if res["err"]:
             raise res["err"]
         return res["val"]
@@ -160,10 +159,11 @@ def execute_python_script_sync(session: "TerminalSession", path: str):
         while True:
             cur_sess[0].script_checkpoint()
             active_session = cur_sess[0]
-            if active_session.connection is None:
-                raise ConnectionError(f"{active_session.name} is not connected")
-            if active_session.connected_label != "Disconnected":
+            connecting = getattr(active_session, "connecting", False)
+            if active_session.connection is not None and active_session.connected_label != "Disconnected":
                 return True
+            if active_session.connection is None and not connecting:
+                raise ConnectionError(f"{active_session.name} is not connected")
             if time.monotonic() >= deadline:
                 raise TimeoutError(f"Timed out connecting {active_session.name}")
             time.sleep(0.05)
@@ -372,4 +372,6 @@ def execute_python_script_sync(session: "TerminalSession", path: str):
         "terminal_name": DynamicTerminalName()
     }
     session.script_checkpoint()
-    exec(compile(code, path, "exec"), globs, {})
+    # One namespace for globals *and* locals: with separate dicts, functions defined in
+    # the script cannot see the script's own top-level names or imports (NameError).
+    exec(compile(code, path, "exec"), globs)

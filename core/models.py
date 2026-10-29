@@ -10,7 +10,7 @@ from PyQt6.QtGui import QTextCharFormat, QColor, QFont, QTextCursor
 from core.theme import TERMINAL_BG, TERMINAL_FG, TERMINAL_ACCENT, PALETTE
 
 if TYPE_CHECKING:
-    from main import TerminalApp
+    from gui.main_window import TerminalApp
     from core.connections import BaseConnection
     from gui.terminal_widget import TerminalWidget
 
@@ -39,6 +39,9 @@ class TerminalSession:
     incoming: queue.Queue[str] = field(default_factory=queue.Queue)
     connection: "BaseConnection" | None = None
     connected_label: str = "Disconnected"
+    # True from the moment a connect attempt starts until it succeeded or failed;
+    # lets scripts wait for the attempt instead of racing the worker thread.
+    connecting: bool = False
     log_enabled: bool = False
     log_paused: bool = False
     log_file: object | None = None
@@ -250,17 +253,24 @@ class TerminalSession:
             self.connection_lost_notified = True
 
     def wait_for(self, pattern: str, timeout: float = 60.0, case_sensitive: bool = True) -> bool:
+        """Block until ``pattern`` appears in the received data or on the rendered screen.
+
+        ``script_checkpoint`` can block for as long as the user keeps the script paused,
+        so it must never run while holding ``recv_condition`` (that would freeze the
+        GUI thread inside ``append``).
+        """
         deadline = time.time() + timeout
         needle = pattern if case_sensitive else pattern.lower()
-        with self.recv_condition:
-            while True:
-                self.script_checkpoint()
+        while True:
+            self.script_checkpoint()  # outside the lock: may block while paused
+            with self.recv_condition:
                 haystack = self.recv_buffer if case_sensitive else self.recv_buffer.lower()
                 if needle in haystack:
                     return True
                 try:
-                    for row in self.screen.buffer.values():
-                        line_str = "".join(char.data or " " for char in row)
+                    # ``display`` yields one fully padded string per screen row; iterating
+                    # ``screen.buffer`` rows yields column indexes, not characters.
+                    for line_str in self.screen.display:
                         if not case_sensitive:
                             line_str = line_str.lower()
                         if needle in line_str:

@@ -50,10 +50,7 @@ from gui.sftp_dialog import SFTPBrowserDialog
 from gui.terminal_widget import TerminalWidget
 from gui.ui_style import APP_STYLESHEET
 
-try:
-    from gui.ai_assistant_panel import AIAssistantPanel
-except ImportError:
-    from gui.ai_assistant_panel import AIAssistantPanel
+from gui.ai_assistant_panel import AIAssistantPanel
 
 
 class TerminalApp(QMainWindow):
@@ -162,7 +159,7 @@ class TerminalApp(QMainWindow):
 
         help_menu = menubar.addMenu("&Help")
         help_menu.addAction("Sample Scripts && Templates...", lambda: SamplesDialog(self).exec())
-        help_menu.addAction("Developer Info / About...", lambda: SamplesDialog(self).exec())
+        help_menu.addAction("Developer Info / About...", self._show_about)
 
     def _build_ui(self):
         self.setStyleSheet(APP_STYLESHEET)
@@ -706,11 +703,18 @@ class TerminalApp(QMainWindow):
     def connect_session(self, s: TerminalSession, conn: BaseConnection, label: str):
         if s.connection:
             s.close()
+        s.connecting = True
 
         def worker():
             try:
-                s.connection = conn
                 conn.start(s.incoming)
+                if s not in self.sessions:  # tab was closed while we were connecting
+                    conn.close()
+                    return
+                # Publish the connection only once it is usable. Assigning it earlier
+                # let keystrokes typed during the handshake hit a half-open channel,
+                # raise, and tear the brand-new connection down.
+                s.connection = conn
                 s.connected_label = label
                 s.connection_lost_notified = False
                 s.incoming.put(f"\r\n[Active: {label}]\r\n")
@@ -718,6 +722,10 @@ class TerminalApp(QMainWindow):
                 self.after(300, lambda: self._apply_resize(s))
             except Exception as exc:
                 error_text = str(exc)
+                try:
+                    conn.close()  # release sockets / paramiko transport threads
+                except Exception:
+                    pass
                 s.connection, s.connected_label = None, "Disconnected"
                 s.incoming.put(f"\r\n[Connection failed: {error_text}]\r\n")
                 self.after(0, lambda: self.select_session(s) if s in self.sessions else None)
@@ -727,10 +735,23 @@ class TerminalApp(QMainWindow):
                         self, "Connection Failed", f"Could not establish {label}.\n\n{error_text}"
                     ),
                 )
+            finally:
+                s.connecting = False
 
         threading.Thread(target=worker, daemon=True).start()
         self.status_label.setText(f"Connecting: {label}")
         self.after(200, lambda: self.select_session(s) if s in self.sessions else None)
+
+    def _show_about(self):
+        QMessageBox.about(
+            self,
+            "About Modern Multi Terminal",
+            "<b>Modern Multi Terminal</b><br>SSH / Serial / Telnet terminal with scripting "
+            "(Python + Tera Term macros), SFTP and an AI assistant that can use Ollama, "
+            "hosted LLM APIs or a local GGUF model.<br><br>"
+            "Engineered by Aby Shergill &middot; BSD License<br>"
+            "<a href='https://github.com/abyshergill/modern_multi_terminal'>github.com/abyshergill/modern_multi_terminal</a>",
+        )
 
     def disconnect_current(self):
         s = self.current_session()
