@@ -1,93 +1,223 @@
 <div align="center">
 
-# ⚡ Modern Multi Terminal Emulator 3.0
+# ⚡ Modern Multi Terminal Emulator
 ### & DevOps Sequencer Suite
 
-**The next-generation, cross-platform automation workbench & drop-in Tera Term replacement.**
+**A cross-platform automation workbench, drop-in Tera Term replacement and AI-assisted test-engineering terminal.**
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
-[![GUI](https://img.shields.io/badge/GUI-CustomTkinter-46f0a6?style=for-the-badge)](https://github.com/TomSchimansky/CustomTkinter)
+[![GUI](https://img.shields.io/badge/GUI-PyQt6-41cd52?style=for-the-badge&logo=qt&logoColor=white)](https://www.riverbankcomputing.com/software/pyqt/)
 [![Protocols](https://img.shields.io/badge/Protocols-SSH%20%7C%20Telnet%20%7C%20Serial-38b6ff?style=for-the-badge)]()
-[![License](https://img.shields.io/badge/License-BSD-purple?style=for-the-badge)](LICENSE)
+[![AI](https://img.shields.io/badge/AI-Ollama%20%7C%20OpenAI%20%7C%20Anthropic%20%7C%20GGUF-ff9f43?style=for-the-badge)]()
+[![License](https://img.shields.io/badge/License-BSD-purple?style=for-the-badge)](LICENSE.txt)
 
 ---
 
 </div>
 
-## Overview
+## 📖 Overview
 
-Network SREs and hardware developers are constantly forced to choose between **writing modern Python automation** and **supporting legacy Tera Term (`.ttl`) infrastructure**. 
+Network SREs and hardware developers are constantly forced to choose between **writing modern Python automation** and **supporting legacy Tera Term (`.ttl`) infrastructure**.
 
-**Modern Multi Terminal** bridges the gap. It is an enterprise-grade workbench that runs concurrent multi-protocol live sessions alongside a **Digital Audio Workbench (DAW)-style automation sequencer**—allowing teams to execute mixed legacy macros and Python scripts inside a unified, strobe-free interface.
+**Modern Multi Terminal** bridges the gap. It runs concurrent multi-protocol live sessions alongside a **DAW-style automation sequencer**, so teams can execute mixed legacy macros and Python scripts in one interface. An integrated **AI Test Engineer** can read your terminals, propose commands and, when you allow it, type them straight into the terminals you pick.
+
+---
+
+## 🆕 What's New
+
+* **LLM → Terminal modes.** One checkbox decides whether the AI acts on its own (**AUTO-RUN**) or asks first (**ASK FIRST**). See [AI Test Engineer](#-ai-test-engineer).
+* **No terminal needs to be open first.** With AUTO-RUN on, the AI opens a tab if none exists. If no tab is connected, it asks you to connect one instead of dropping the command.
+* **Run in Terminal picker.** One dialog to review or edit commands, tick the target terminals, connect a tab or open a new one, and send.
+* **Multi-terminal sending.** Commands can go to the current tab, a named tab, several tabs or all connected tabs, and the real output is passed back to the AI.
+* **Always-dark professional UI.** The app no longer follows the system theme. It uses a single dark palette, a token-based stylesheet and consistent buttons, tabs, dialogs and menus.
+* **Redesigned close buttons.** Terminal tabs and the sidebar use a crisp drawn "x" that is muted at rest and turns red on hover.
+* **Many LLM providers.** OpenAI, Anthropic, Gemini, Groq, Mistral, DeepSeek, xAI, OpenRouter, Together AI, Ollama, LM Studio and local GGUF files.
 
 ---
 
 ## ✨ Engineering Highlights
 
-### Tri-Protocol Connection Engine
+### 🔌 Tri-Protocol Connection Engine
 * **SSH-2:** Fully allocated PTY interactive shell streams powered by `paramiko`.
-* **Hardware Serial:** Native `pyserial` bridge with live hardware discovery *(displays friendly driver names like `CP210x USB to UART Bridge (COM6)` rather than raw system paths)*.
-* **Telnet:** Raw TCP socket engine featuring an automated background regex scrubber that strips binary `IAC (0xFF)` negotiation spam.
+* **Hardware Serial:** Native `pyserial` bridge with live hardware discovery *(friendly driver names such as `CP210x USB to UART Bridge (COM6)` instead of raw system paths)*.
+* **Telnet:** Raw TCP socket engine with an automated background scrubber that strips binary `IAC (0xFF)` negotiation spam.
+* **SFTP Browser and Hops:** Browse and transfer files between two systems, including jump-host (hop) chains.
 
-###  Sane VT100 Stream Caret 
-* **True Stream Emulation:** Incoming packets insert strictly at the local green caret position (`"insert"`), never forcibly snapping the user's cursor to the bottom of the screen mid-sentence.
-* **Anti-Bell Trap:** Silently vaporizes rogue Linux `\x07 (BEL)` audio packets before they can corrupt screen geometry or sniffer buffers.
-* **Zero-Flicker Layout:** Fully decoupled widget memory arrays; tabs and scroll views mutate existing Tkinter properties rather than running `.destroy()` redraw loops.
+### 🧠 VT100 Terminal Emulation
+* **True Stream Emulation:** Output is rendered through a `pyte` screen with scrollback and a real caret.
+* **Anti-Bell Trap:** Silently drops rogue `\x07 (BEL)` packets before they can disturb screen geometry or capture buffers.
+* **Per-session Logging:** Start, pause and stop logging for each tab.
 
-### DAW Multi-Script Sequencer
-* **Session Tab Routing:** Assign Row 1 (`login.ttl`) to *Terminal A*, and Row 2 (`scrape_routing_table.py`) to *Terminal B*. The GUI auto-flips tabs to follow active execution.
-* **Smart Prompt Sniffer:** Background regex engine hunts for prompt signifiers (`$`, `#`, `>`) to graduate queue steps hands-free.
-* **The Operator Gate:** If a script times out or throws an exception, execution freezes and triggers an OS audio alert, offering the engineer three choices: `[+15s Extend]`, `[Force Pass]`, or `[Abort]`.
-* **Single-Bench Debugger:** Test Row 4 in isolation using the `► Single` button without waiting for Rows 1–3 to execute.
-
----
-![](assets/main_window.png)
+### 🎛️ DAW Multi-Script Sequencer
+* **Session Tab Routing:** Assign Row 1 (`login.ttl`) to *Terminal A* and Row 2 (`scrape_routing_table.py`) to *Terminal B*. The GUI follows the active execution.
+* **Smart Prompt Sniffer:** A background regex engine hunts for prompt signifiers (`$`, `#`, `>`) to advance queue steps hands-free.
+* **The Operator Gate:** If a script times out or throws an exception, execution freezes and raises an OS audio alert, offering `[+15s Extend]`, `[Force Pass]` or `[Abort]`.
+* **Single-Bench Debugger:** Test one row in isolation with the `► Single` button.
 
 ---
+![MMTE main window](assests/main_window.png)
 
-## Quickstart Guide
+## 🤖 AI Test Engineer
+
+Open the AI panel from the **AI** menu. The assistant reads your terminal scrollback, answers questions about the app and your project, and can act on terminals through validated application tools. It never launches macOS Terminal or another external shell. Everything runs in the app's own tabs through the built-in Python script engine.
+
+### LLM → Terminal modes
+
+| Checkbox | Badge | Behaviour |
+|---|---|---|
+| Checked | `AUTO-RUN` | The AI decides what to run and sends the commands straight to the terminal. If no tab exists it opens one. If no tab is connected it asks you to connect one. Output is read back and summarised. |
+| Unchecked | `ASK FIRST` | The AI only prepares the commands. A permission dialog lists them (editable) and asks which terminals to use. Nothing is sent until you approve. |
+
+The choice is saved between launches. Analyze Log and advice-style questions never send anything in either mode.
+
+### Run in Terminal
+
+Click **Run in Terminal** to send the AI's latest commands yourself:
+
+1. A dialog lists the commands from the latest answer. You can edit or remove lines.
+2. Every open terminal is listed, and connected ones are ticked. Select one or several.
+3. If a tab is not connected, connect it from the dialog. You can also open a new terminal there.
+4. Choose the delay between commands and press **Run** (**Don't run** when approving AI commands). Output from each terminal is returned to the AI for a summary.
+
+### Application tools available to the model
+
+`list_terminals`, `read_terminal`, `create_terminal`, `rename_terminal`, `connect_terminal` and `send_terminal`. The target of `send_terminal` can be `current`, a tab name, several comma-separated names, or `all`. Tool calls are validated and executed by the existing script engine. Models that return JSON tool requests as plain text instead of native tool calls are also supported, and an identical action is never run twice in a row.
+
+### Providers and settings
+
+Open **AI → LLM Settings** to pick a provider, endpoint, model and API key.
+
+| Backend | Providers |
+|---|---|
+| OpenAI-compatible | OpenAI, Google Gemini, Groq, Mistral, DeepSeek, xAI (Grok), OpenRouter, Together AI, LM Studio |
+| Native | Anthropic, Ollama |
+| In-process | Local GGUF file (`pip install -r requirements-gguf.txt`) |
+
+* **Local Ollama:** choose **Ollama (Local)** and set an installed model such as `llama3.1` or `qwen2.5:7b`. The default endpoint is `http://localhost:11434`.
+* **API keys** can be entered in the dialog or read from the provider's environment variable, for example `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`.
+* **Attach Active Terminal Output Buffer** adds recent scrollback from the selected tab to each prompt. Passwords and tokens are masked before output is sent to a cloud model (the privacy option in LLM Settings, on by default).
+* **Stop** cancels an in-progress request.
+
+### Project RAG memory
+
+The app creates a read-only **Modern Multi Terminal (Built-in)** memory that documents its own architecture, script engine, connections, logging, DAW playlist, SFTP hops and AI tool flow. It is combined with any project RAG you select, never replaced by it. Embeddings are cached and relevant passages are chosen per query. If the embedding endpoint is unavailable, keyword retrieval is used. Manage your own memories under **AI → Manage Project RAG Memories**.
+
+---
+
+## 🏗️ Modular System Architecture
+
+```text
+modern_multi_terminal/
+│
+├── assets/                      # App branding & screenshots
+├── Scripts/                     # Sample scripts
+│   ├── python/                  #   Python automation examples
+│   └── ttl/                     #   Tera Term macro examples
+│
+├── core/
+│   ├── models.py                # Session state tracking, pyte screen, scrollback, logging
+│   ├── connections.py           # Threaded SSH, Serial and Telnet drivers
+│   ├── script_engine.py         # Tera Term (.ttl) interpreter & Python exec() global hooks
+│   ├── sftp_hops.py             # SSH hop / jump-host chains for SFTP
+│   ├── profile_store.py         # Saved connection profiles
+│   ├── presets.py               # Embedded sample macro repository
+│   ├── theme.py                 # Terminal colours and palette
+│   ├── qt_theme.py              # Application-wide dark palette and fonts
+│   ├── terminal_dispatch.py     # Qt-free command parsing, target resolution, approval queue
+│   ├── llm_chat.py              # Chat orchestration with application tools
+│   ├── llm_config.py            # LLM settings persistence
+│   ├── rag_manager.py           # Project RAG memories
+│   ├── application_knowledge.py # Built-in app documentation used by RAG
+│   ├── redact.py                # Secret redaction for attached output
+│   └── llm/                     # Provider backends
+│       ├── providers.py         #   Provider registry
+│       ├── factory.py           #   Backend selection
+│       ├── openai_backend.py    #   OpenAI-compatible APIs
+│       ├── anthropic_backend.py #   Anthropic
+│       ├── ollama_backend.py    #   Ollama
+│       ├── gguf_backend.py      #   Local GGUF models
+│       ├── embeddings.py        #   Embedding clients
+│       ├── agent.py             #   Tool-calling loop
+│       ├── tools.py             #   Application tool schemas
+│       ├── settings.py          #   Settings model
+│       └── errors.py
+│
+├── gui/
+│   ├── main_window.py           # Main window, tabs, sidebar, menus
+│   ├── ai_assistant_panel.py    # AI Test Engineer panel and LLM → Terminal logic
+│   ├── run_terminal_dialog.py   # Terminal picker / approval dialog
+│   ├── close_button.py          # Drawn close ("x") button for tabs and sidebar
+│   ├── ui_style.py              # Dark design tokens and application stylesheet
+│   ├── terminal_widget.py       # Terminal rendering and input
+│   ├── dialogs.py               # Connection builders, Rename, Help
+│   ├── daw_manager.py           # DAW playlist sequencer
+│   ├── sftp_dialog.py           # SFTP browser with hop support
+│   ├── profiles_dialog.py       # Saved profile manager
+│   ├── llm_settings_dialog.py   # LLM provider settings
+│   ├── rag_dialog.py            # RAG memory manager
+│   ├── session_label.py         # Sidebar session rows
+│   └── helpers.py
+│
+├── tests/                       # Headless pytest suite (see tests/README.md)
+├── pytest.ini
+├── main.py                      # Application entry point
+├── LICENSE.txt                  # BSD 3-Clause License
+├── requirements.txt             # Runtime dependencies
+├── requirements-test.txt        # Test dependencies
+└── requirements-gguf.txt        # Optional local GGUF support
+```
+
+---
+
+## 🚀 Quickstart Guide
 
 ### 1. Requirements
 
-Ensure you have **Python 3.10 or higher** installed on Windows, macOS, or Linux.
+**Python 3.10 or higher** on Windows, macOS or Linux.
 
 ### 2. Installation
 
-Clone the repository and install the 3 lightweight core dependencies:
-
 ```bash
-git clone https://github.com/abyshergill/MMTE
+git clone https://github.com/abyshergill/MMTE.git
 cd MMTE
 
 pip install -r requirements.txt
 ```
 
+Runtime dependencies include `PyQt6`, `paramiko`, `pyserial`, `pyte` and `requests`.
+
 ### 3. Launch
 
 ```bash
 python main.py
-
 ```
 
-### Local LLM in the AI Test Engineer
+The application always starts in the dark theme, regardless of the operating-system setting.
 
-Open **AI → LLM Settings**, choose **Ollama (Local)**, and set the model name to an installed Ollama model (for example, `llama3.1` or `qwen2.5:7b`). The default Ollama-compatible endpoint is `http://localhost:11434/v1`. OpenAI-compatible local servers can use their own base URL, such as `http://localhost:1234/v1`; Ollama's native endpoint ending in `/api/chat` is also accepted.
+### 4. First AI session
 
-The AI panel streams answers and its **Stop** button cancels an in-progress request. With **Attach Active Terminal Output Buffer** enabled, each prompt includes recent scrollback from the selected embedded session. The assistant retrieves relevant app and project instructions before answering. Advice-only questions do not receive mutation tools. Explicit requests to create/rename/connect tabs or send terminal input use application tools and the built-in automation engine; they do not launch macOS Terminal or another shell.
-
-The app automatically creates a read-only **Modern Multi Terminal (Built-in)** RAG memory and selects it by default. It documents the actual app/session architecture, script engine, connection requirements, terminal output/logging, DAW playlist, SFTP hops, and AI tool flow. It is combined with a selected project RAG, not replaced by it. The Ollama embedding model is `qwen3-embedding:0.6b`; embeddings are cached and relevant passages are selected per query. If Ollama's embedding endpoint is unavailable, keyword retrieval is used. The built-in memory is visible but protected from edits in **Manage Project RAG Memories**.
-
-The selected Ollama chat model receives structured application tools (`create_terminal`, `rename_terminal`, `connect_terminal`, `send_terminal`, `read_terminal`, and `list_terminals`) plus current tab/connection state and retrieved app-specific knowledge. Tool calls are validated, executed by the existing Python script engine, and actual app output is sent back to Ollama for its final response. Mutating tools are only exposed when the current user message requests the corresponding operation. Qwen models that return JSON tool requests as message content instead of native `tool_calls` are also supported; repeated identical actions are not run twice. Configure the response model and Ollama base URL under **AI → LLM Settings**; the embedding model is configured in the built-in RAG memory.
+1. Open **AI → LLM Settings** and choose a provider, model and key.
+2. Open a terminal and connect it (**Connection → SSH / Telnet / Serial**).
+3. In the AI panel, choose the mode with the **LLM → Terminal** checkbox and send a request such as `check the uptime on this device`.
 
 ---
 
-## Automation Syntax Reference
+## 🧪 Testing
 
-The suite natively parses both formats side-by-side. You can drag both file types into the same Multi-Script playlist.
+```bash
+pip install -r requirements-test.txt
+pytest
+```
+
+The suite runs headless (`QT_QPA_PLATFORM=offscreen`) and needs no display, network or hardware. `tests/test_terminal_dispatch.py` covers the Qt-free dispatch logic and can run without PyQt6. See [tests/README.md](tests/README.md) for details.
+
+---
+
+## 📜 Automation Syntax Reference
+
+Both formats can sit side by side in the same Multi-Script playlist.
 
 ### Option A: Tera Term Macro (`.ttl`)
-
-*Fully supports standard TTL runtime variables, inline comments, and termination hooks.*
 
 ```ini
 ; login_sequence.ttl
@@ -103,17 +233,13 @@ sendln 'supersecret'
 wait Prompt
 sendln 'show system uptime'
 end
-
 ```
 
 ### Option B: Native Python (`.py`)
 
-*Exposes injected global thread hooks directly to your standard Python code.*
-
 ```python
 # login_sequence.py
 
-# Programmatic socket handoff
 connect_telnet("192.168.1.50", port=23)
 wait(1.0)
 
@@ -125,32 +251,42 @@ wait(1.0)
 
 send("show system uptime")
 print("--- Automated Diagnostic Complete ---")
-
 ```
 
-#### Available Injected Python Globals:
+#### Injected Python globals
 
 * `connect_ssh(host, username, password, port=22)`
 * `connect_serial(port, baudrate, bytesize=8, parity="N", stopbits=1)`
 * `connect_telnet(host, port=23)`
+* `wait_connected(...)`
 * `send(text, newline=True, delay=0.0)`
+* `print(text)`: writes to the terminal
 * `wait(seconds)` / `sleep(seconds)`
+* `log_on(...)` / `log_off()`
+* `alert(...)` / `input(...)`
+* `terminal_new(name)`, `terminal_select(name)`, `terminal_rename(current, new)`, `terminal_close(name)`, `terminal_list()`
+* `run_script(path)`
+* `terminal_name`: the name of the current terminal
+
+More examples are in `Scripts/python` and `Scripts/ttl`.
 
 ---
 
-## Local System Directories
+## 📂 Local System Directories
 
-The emulator safely isolates its footprint to the user's home directory:
+Settings and logs live under the user's home directory:
 
-* **SSH Profiles:** `~/.modern_multi_terminal_emulator/ssh_profiles.json`
-* **Stream Session Logs:** `~/.modern_multi_terminal_emulator/logs/*.log`
+* **Configuration folder:** `~/.modern_multi_terminal_emulator/`
+* **SSH and Telnet profiles:** `ssh_profiles.json`, `telnet_profiles.json`
+* **Session logs:** `logs/*.log`
+* **LLM settings:** `llm_config.json` in the same folder, including the saved LLM → Terminal mode
 
 ---
 
-## License & Contact
+## 🛡️ License & Contact
 
-Distributed under the **BSD 3-Clause License**. See `LICENSE` for more information.
+Distributed under the **BSD 3-Clause License**. See `LICENSE.txt` for more information.
 
 **Project Architect:** DevOps Suite Development Team
 
-*Found a bug or need an enterprise protocol scraper added?* **[Click here to open an Issue or reach out to the Creator ↗](https://github.com/abyshergill)**
+*Found a bug or need an enterprise protocol scraper added?* **[Open an issue or reach out to the creator ↗](https://github.com/abyshergill/MMTE)**

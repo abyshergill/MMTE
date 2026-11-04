@@ -1,162 +1,256 @@
-from core.theme import TERMINAL_ACCENT, TERMINAL_BG, TERMINAL_FG
+"""Application-wide dark stylesheet.
 
-APP_STYLESHEET = f"""
-QMainWindow {{
-    background-color: #12161b;
-}}
+All colours come from ``TOKENS`` so the whole app (main window, docks, dialogs,
+message boxes, the AI panel) shares one look.  The stylesheet is applied to the
+``QApplication`` in ``main.py`` (and to ``TerminalApp`` itself so the window also
+looks right when it is created without ``main.py``).
 
-/* --- Top menu bar --- */
-QMenuBar {{
-    background-color: #171c22;
-    color: #dbe6e2;
-    padding: 3px 8px;
-    font-size: 13px;
-    border-bottom: 1px solid #262d35;
-}}
-QMenuBar::item {{
-    background: transparent;
-    padding: 7px 16px;
-    margin: 1px 2px;
-    border-radius: 5px;
-}}
-QMenuBar::item:selected {{
-    background-color: #212a32;
-    color: {TERMINAL_ACCENT};
-}}
-QMenuBar::item:pressed {{
-    background-color: #26313b;
-}}
-QMenu {{
-    background-color: #171c22;
-    color: #dbe6e2;
-    border: 1px solid #2a323c;
-    padding: 6px;
-    border-radius: 6px;
-}}
-QMenu::item {{
-    padding: 7px 28px 7px 16px;
-    border-radius: 4px;
-}}
-QMenu::item:selected {{
-    background-color: #223138;
-    color: {TERMINAL_ACCENT};
-}}
-QMenu::item:disabled {{
-    color: #56626b;
-}}
-QMenu::separator {{
-    height: 1px;
-    background: #2a323c;
-    margin: 5px 8px;
-}}
+Semantic object names understood here:
+
+* buttons:  ``AccentBtn`` / ``PrimaryBtn`` (main action), ``DangerBtn``,
+  ``GhostBtn`` (quiet), default (secondary)
+* labels:   ``SectionTitle``, ``Subtle``, ``Hint``
+* frames:   ``Card``
+* AI panel: ``AIPanel``, ``AIChat``, ``AIPrompt``, ``ModeBadge[mode=auto|ask]``
+"""
+
+from core.theme import TERMINAL_ACCENT, TERMINAL_BG, TERMINAL_FG  # noqa: F401  (re-exported for callers)
+
+TOKENS = {
+    "bg0": "#0d1117",       # window / deepest surface
+    "bg1": "#141a22",       # panels, sidebar, menus
+    "bg2": "#1a222c",       # inputs, cards
+    "bg3": "#232d39",       # hover
+    "line": "#27313d",      # hairlines
+    "line2": "#344253",     # stronger borders
+    "text": "#e6edf3",
+    "dim": "#9aa8b6",
+    "mute": "#6b7a89",
+    "accent": TERMINAL_ACCENT,
+    "accent_hi": "#5fd8c9",
+    "accent_fg": "#04201c",
+    "info": "#5aa9ff",
+    "ok": "#4cc38a",
+    "warn": "#e0a93b",
+    "err": "#ef6a73",
+    "err_bg": "#33191d",
+    "err_line": "#6b2f39",
+    "select": "#1f4f5a",
+    "term_bg": TERMINAL_BG,
+    "term_fg": TERMINAL_FG,
+    "mono": "'Cascadia Mono', 'JetBrains Mono', Consolas, 'SF Mono', Menlo, 'DejaVu Sans Mono', monospace",
+    "sans": "'Segoe UI Variable', 'Segoe UI', Inter, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif",
+}
+
+# Colours used when the AI panel writes rich text into its chat view.
+CHAT_COLORS = {
+    "user": TOKENS["info"],
+    "ai": TOKENS["ok"],
+    "muted": TOKENS["mute"],
+    "warn": TOKENS["warn"],
+    "err": TOKENS["err"],
+    "note": TOKENS["accent"],
+}
+
+_TEMPLATE = """
+QWidget { color: @text@; }
+QMainWindow, QDialog { background-color: @bg0@; }
+QDialog QLabel { background: transparent; }
+QToolTip {
+    background-color: @bg2@; color: @text@;
+    border: 1px solid @line2@; padding: 5px 8px; border-radius: 4px;
+}
+
+/* --- Menus --- */
+QMenuBar {
+    background-color: @bg1@; color: @text@; padding: 2px 8px;
+    border-bottom: 1px solid @line@;
+}
+QMenuBar::item { background: transparent; padding: 7px 14px; margin: 2px 1px; border-radius: 5px; }
+QMenuBar::item:selected { background-color: @bg3@; color: @accent@; }
+QMenuBar::item:pressed { background-color: @bg3@; }
+QMenu {
+    background-color: @bg1@; color: @text@; border: 1px solid @line2@;
+    padding: 6px; border-radius: 8px;
+}
+QMenu::item { padding: 7px 30px 7px 16px; border-radius: 5px; }
+QMenu::item:selected { background-color: @bg3@; color: @accent@; }
+QMenu::item:disabled { color: @mute@; }
+QMenu::separator { height: 1px; background: @line@; margin: 6px 8px; }
 
 /* --- Sidebar --- */
-QFrame#Sidebar {{
-    background-color: #171c22;
-    border-right: 1px solid #262d35;
-}}
-QLabel#SidebarTitle {{
-    color: #8aa0ac;
-    letter-spacing: 1px;
-}}
-QLabel#SidebarSubtitle {{
-    color: #5c6b74;
-    font-size: 11px;
-    letter-spacing: 1px;
-    padding-top: 2px;
-}}
-QPushButton#CollapseBtn {{
-    background: transparent;
-    color: #8aa0ac;
-    border: none;
-    border-radius: 4px;
-    font-weight: bold;
-}}
-QPushButton#CollapseBtn:hover {{
-    background-color: #222a32;
-    color: {TERMINAL_ACCENT};
-}}
-QListWidget#SessionList {{
+QFrame#Sidebar { background-color: @bg1@; border-right: 1px solid @line@; }
+QLabel#SidebarTitle { color: @dim@; letter-spacing: 1.5px; background: transparent; }
+QLabel#SidebarSubtitle {
+    color: @mute@; font-size: 11px; letter-spacing: 1.5px; padding-top: 2px; background: transparent;
+}
+QPushButton#CollapseBtn {
+    background: transparent; color: @dim@; border: none; border-radius: 5px; font-weight: bold; padding: 0;
+}
+QPushButton#CollapseBtn:hover { background-color: @bg3@; color: @accent@; }
+QListWidget#SessionList { background-color: transparent; border: none; outline: none; }
+
+/* --- Buttons --- */
+QPushButton {
+    background-color: @bg2@; color: @text@; border: 1px solid @line2@;
+    border-radius: 6px; padding: 6px 14px; min-height: 18px;
+}
+QPushButton:hover { background-color: @bg3@; border-color: @accent@; }
+QPushButton:pressed { background-color: @bg1@; }
+QPushButton:focus { border-color: @accent@; }
+QPushButton:disabled { color: @mute@; border-color: @line@; background-color: @bg1@; }
+QPushButton#AccentBtn, QPushButton#PrimaryBtn {
+    background-color: @accent@; color: @accent_fg@; border: 1px solid @accent@; font-weight: 600;
+}
+QPushButton#AccentBtn:hover, QPushButton#PrimaryBtn:hover { background-color: @accent_hi@; border-color: @accent_hi@; }
+QPushButton#AccentBtn:pressed, QPushButton#PrimaryBtn:pressed { background-color: @accent@; }
+QPushButton#AccentBtn:disabled, QPushButton#PrimaryBtn:disabled {
+    background-color: @bg2@; color: @mute@; border-color: @line@;
+}
+QPushButton#DangerBtn { background-color: @err_bg@; border-color: @err_line@; color: #f4b9be; }
+QPushButton#DangerBtn:hover { background-color: #4a222a; border-color: @err@; }
+QPushButton#GhostBtn { background: transparent; border: 1px solid transparent; color: @dim@; }
+QPushButton#GhostBtn:hover { background-color: @bg3@; color: @text@; border-color: @line2@; }
+
+/* --- Inputs --- */
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTextEdit, QPlainTextEdit {
+    background-color: @bg2@; color: @text@; border: 1px solid @line2@;
+    border-radius: 6px; padding: 5px 8px;
+    selection-background-color: @select@; selection-color: @text@;
+}
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus,
+QTextEdit:focus, QPlainTextEdit:focus { border-color: @accent@; }
+QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled, QTextEdit:disabled, QPlainTextEdit:disabled {
+    color: @mute@; background-color: @bg1@;
+}
+QComboBox QAbstractItemView {
+    background-color: @bg1@; border: 1px solid @line2@; selection-background-color: @bg3@;
+    selection-color: @accent@; outline: none; padding: 3px;
+}
+
+/* The live terminal must keep exact geometry (columns/rows are computed from its
+   viewport and font metrics), so undo every generic text-input rule for it. */
+QPlainTextEdit#TerminalView, QPlainTextEdit#TerminalView:focus {
+    background-color: @term_bg@; color: @term_fg@; border: none; border-radius: 0;
+    padding: 0; selection-background-color: @term_fg@; selection-color: @term_bg@;
+}
+
+/* --- Check / radio --- */
+QCheckBox, QRadioButton { spacing: 8px; background: transparent; }
+QCheckBox::indicator, QRadioButton::indicator {
+    width: 15px; height: 15px; border: 1px solid @line2@; background: @bg2@; border-radius: 4px;
+}
+QRadioButton::indicator { border-radius: 8px; }
+QCheckBox::indicator:hover, QRadioButton::indicator:hover { border-color: @accent@; }
+QCheckBox::indicator:checked, QRadioButton::indicator:checked {
+    background-color: @accent@; border-color: @accent@;
+}
+QCheckBox::indicator:disabled { background: @bg1@; border-color: @line@; }
+QCheckBox:disabled { color: @mute@; }
+
+/* --- Lists, tables, trees --- */
+QListWidget, QListView, QTreeView, QTreeWidget, QTableView, QTableWidget {
+    background-color: @bg2@; border: 1px solid @line@; border-radius: 6px; outline: none;
+    alternate-background-color: @bg1@; gridline-color: @line@;
+    selection-background-color: @select@; selection-color: @text@;
+}
+QListWidget::item { padding: 5px 6px; border-radius: 4px; }
+QListWidget::item:hover { background-color: @bg3@; }
+QListWidget::item:selected { background-color: @select@; color: @text@; }
+QHeaderView::section {
+    background-color: @bg1@; color: @dim@; padding: 6px 8px; border: none;
+    border-bottom: 1px solid @line2@; border-right: 1px solid @line@;
+}
+
+/* --- Group boxes / tabs --- */
+QGroupBox {
+    border: 1px solid @line@; border-radius: 8px; margin-top: 12px; padding: 12px 8px 8px 8px;
     background-color: transparent;
-    border: none;
-}}
+}
+QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; color: @dim@; }
+QTabWidget::pane { border: 1px solid @line@; border-radius: 6px; top: -1px; }
 
-/* --- Generic buttons --- */
-QPushButton {{
-    background-color: #232b33;
-    color: #dbe6e2;
-    border: 1px solid #2e3841;
-    border-radius: 6px;
-    padding: 7px 12px;
-}}
-QPushButton:hover {{
-    background-color: #2b3540;
-    border-color: {TERMINAL_ACCENT};
-}}
-QPushButton:pressed {{
-    background-color: #1c232a;
-}}
-QPushButton:disabled {{
-    color: #55626b;
-    border-color: #262d35;
-    background-color: #1b2127;
-}}
-QPushButton#AccentBtn {{
-    background-color: {TERMINAL_ACCENT};
-    color: #06231d;
-    border: none;
-    font-weight: bold;
-}}
-QPushButton#AccentBtn:hover {{
-    background-color: #55d9c8;
-}}
-QPushButton#DangerBtn {{
-    background-color: #3a2126;
-    border-color: #6b2f39;
-    color: #f0b7bd;
-}}
-QPushButton#DangerBtn:hover {{
-    background-color: #5c2530;
-}}
+QTabBar { background: transparent; }
+QTabBar::tab {
+    background: @bg1@; color: @dim@; padding: 7px 10px 7px 16px; margin-right: 2px;
+    border-top-left-radius: 6px; border-top-right-radius: 6px;
+    border: 1px solid @line@; border-bottom: none;
+}
+QTabBar::tab:selected {
+    background: @bg0@; color: @accent@; border-color: @line2@; border-bottom: 2px solid @accent@;
+}
+QTabBar::tab:hover:!selected { color: @text@; background-color: @bg2@; }
+QTabBar::close-button { subcontrol-position: right; margin: 0 2px 0 6px; }
 
-/* --- Tab bar --- */
-QTabBar::tab {{
-    background: #171c22;
-    color: #8aa0ac;
-    padding: 7px 20px;
-    margin-right: 2px;
-    border-top-left-radius: 6px;
-    border-top-right-radius: 6px;
-    border: 1px solid #262d35;
-    border-bottom: none;
-}}
-QTabBar::tab:selected {{
-    background: {TERMINAL_BG};
-    color: {TERMINAL_ACCENT};
-    border-color: #2e3841;
-    border-bottom: 2px solid {TERMINAL_ACCENT};
-}}
-QTabBar::tab:hover {{
-    color: #dbe6e2;
-}}
+/* --- Dock widget (AI panel container) --- */
+QDockWidget { color: @text@; titlebar-close-icon: none; }
+QDockWidget::title {
+    background-color: @bg1@; color: @dim@; padding: 8px 12px; text-align: left;
+    border-bottom: 1px solid @line@; letter-spacing: 1px;
+}
+QMainWindow::separator { background: @line@; width: 1px; height: 1px; }
+QMainWindow::separator:hover { background: @accent@; }
+QSplitter::handle { background: @line@; }
 
-/* --- Status bar --- */
-QLabel#StatusBar {{
-    background-color: #171c22;
-    color: #8aa0ac;
-    padding: 5px 12px;
-    border-top: 1px solid #262d35;
-    font-size: 12px;
-}}
+/* --- Scrollbars --- */
+QScrollBar:vertical { background: transparent; width: 11px; margin: 2px; }
+QScrollBar:horizontal { background: transparent; height: 11px; margin: 2px; }
+QScrollBar::handle:vertical { background: @line2@; border-radius: 4px; min-height: 28px; }
+QScrollBar::handle:horizontal { background: @line2@; border-radius: 4px; min-width: 28px; }
+QScrollBar::handle:hover { background: @mute@; }
+QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
 
-QLineEdit, QComboBox {{
-    background-color: #171c22;
-    border: 1px solid #2e3841;
-    border-radius: 5px;
-    padding: 5px 8px;
-    color: #dbe6e2;
-}}
-QLineEdit:focus, QComboBox:focus {{
-    border-color: {TERMINAL_ACCENT};
-}}
+QProgressBar {
+    background-color: @bg2@; border: 1px solid @line@; border-radius: 5px; text-align: center; height: 14px;
+}
+QProgressBar::chunk { background-color: @accent@; border-radius: 4px; }
+
+/* --- Status bar / status text --- */
+QLabel#StatusBar {
+    background-color: @bg1@; color: @dim@; padding: 6px 14px;
+    border-top: 1px solid @line@; font-size: 12px;
+}
+
+/* --- Reusable label / frame roles --- */
+QLabel#SectionTitle { color: @text@; font-weight: 600; letter-spacing: 0.5px; background: transparent; }
+QLabel#Subtle { color: @dim@; font-size: 12px; background: transparent; }
+QLabel#Hint { color: @mute@; font-size: 11px; background: transparent; }
+QFrame#Card { background-color: @bg2@; border: 1px solid @line@; border-radius: 8px; }
+
+/* --- AI Test Engineer panel --- */
+QWidget#AIPanel { background-color: @bg1@; }
+QLabel#AITitle { color: @text@; font-size: 13px; font-weight: 700; letter-spacing: 1.5px; background: transparent; }
+QFrame#AICard { background-color: @bg2@; border: 1px solid @line@; border-radius: 8px; }
+QFrame#AICard QLabel { background: transparent; border: none; }
+QFrame#AIModeBar { background-color: @bg2@; border: 1px solid @line@; border-radius: 8px; }
+QFrame#AIModeBar QLabel, QFrame#AIModeBar QCheckBox { background: transparent; }
+QTextEdit#AIChat {
+    background-color: @bg0@; border: 1px solid @line@; border-radius: 8px; padding: 8px;
+    font-family: @mono@; font-size: 12px;
+}
+QTextEdit#AIPrompt { background-color: @bg2@; border-radius: 8px; padding: 8px; font-size: 13px; }
+QLabel#AIStatus { color: @warn@; font-size: 11px; background: transparent; }
+QLabel#ModeBadge { border-radius: 9px; padding: 2px 9px; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
+QLabel#ModeBadge[mode="auto"] { background-color: #12372f; color: @accent@; border: 1px solid #1d5c50; }
+QLabel#ModeBadge[mode="ask"]  { background-color: #3a2f12; color: @warn@;   border: 1px solid #5c4a1d; }
+
+/* --- Run-in-terminal dialog --- */
+QPlainTextEdit#CommandEditor {
+    font-family: @mono@; font-size: 12px; background-color: @bg0@;
+}
+QListWidget#TerminalPicker::item { padding: 8px 8px; }
 """
+
+
+def build_stylesheet(tokens: dict[str, str] | None = None) -> str:
+    values = dict(TOKENS)
+    values.update(tokens or {})
+    sheet = _TEMPLATE
+    # Longest keys first so e.g. ``accent_hi`` is never clobbered by ``accent``.
+    for key in sorted(values, key=len, reverse=True):
+        sheet = sheet.replace(f"@{key}@", values[key])
+    return sheet
+
+
+APP_STYLESHEET = build_stylesheet()

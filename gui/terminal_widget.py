@@ -17,7 +17,8 @@ class TerminalWidget(QPlainTextEdit):
     def __init__(self, app: object):
         super().__init__()
         self.app = app
-        self.session = None  
+        self.session = None
+        self.setObjectName("TerminalView")  # exempts it from generic text-input styling
 
 
         self.setReadOnly(True)

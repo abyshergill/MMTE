@@ -106,7 +106,7 @@ def test_telnet_dialog_accepts_valid_input(qapp):
     d.host_entry.setText("10.0.0.5")
     d.port_entry.setText("2323")
     d._ok()
-    assert d.result == {"host": "10.0.0.5", "port": 2323}
+    assert d.result == {"host": "10.0.0.5", "port": 2323, "profile_name": "", "save": True}
 
 
 def test_telnet_dialog_rejects_non_numeric_port(qapp):

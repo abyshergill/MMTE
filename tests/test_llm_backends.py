@@ -9,7 +9,7 @@ import requests
 from core.llm import base
 from core.llm.anthropic_backend import AnthropicBackend, anthropic_root, to_anthropic, to_anthropic_tools
 from core.llm.errors import LLMError
-from core.llm.factory import base_endpoint, chat_endpoint, create_backend, list_models, test_connection
+from core.llm.factory import base_endpoint, chat_endpoint, create_backend, list_models, test_connection as check_connection
 from core.llm.gguf_backend import GGUFBackend
 from core.llm.ollama_backend import OllamaBackend, ollama_root, to_ollama_messages
 from core.llm.openai_backend import (
@@ -255,9 +255,9 @@ def test_test_connection_reports_missing_model_and_success(monkeypatch):
         def json(self): return {"models": [{"name": "llama3.1:latest"}]}
 
     monkeypatch.setattr(requests, "get", lambda url, **kw: R())
-    ok, msg = test_connection(OLLAMA_CFG)
+    ok, msg = check_connection(OLLAMA_CFG)
     assert ok and "Connected" in msg  # "llama3.1" matches "llama3.1:latest"
-    ok, msg = test_connection({**OLLAMA_CFG, "model_name": "nope"})
+    ok, msg = check_connection({**OLLAMA_CFG, "model_name": "nope"})
     assert not ok and "nope" in msg and "llama3.1:latest" in msg
 
 
@@ -266,7 +266,7 @@ def test_test_connection_unreachable(monkeypatch):
         raise requests.ConnectionError("refused")
 
     monkeypatch.setattr(requests, "get", boom)
-    ok, msg = test_connection(OLLAMA_CFG)
+    ok, msg = check_connection(OLLAMA_CFG)
     assert not ok and "Could not reach" in msg
 
 

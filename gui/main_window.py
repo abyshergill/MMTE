@@ -40,6 +40,7 @@ from core.profile_store import ProfileStore
 from core.script_engine import TeraTermMacroRunner, execute_python_script_sync
 from core.sftp_hops import get_active_sftp
 from core.theme import TERMINAL_BG
+from gui.close_button import CloseButton
 from gui.daw_manager import MultiScriptDialog
 from gui.dialogs import RenameDialog, SamplesDialog, SerialDialog, SSHDialog, TelnetDialog
 from gui.helpers import _AfterBridge, set_hand_cursor
@@ -270,6 +271,10 @@ class TerminalApp(QMainWindow):
         if session is not None:
             self.close_session(session)
 
+    def _close_tab_for(self, session) -> None:
+        if session in self.sessions:
+            self.close_session(session)
+
     def _tab_index_for_session(self, session) -> int:
         for i in range(self.tab_bar.count()):
             if self.tab_bar.tabData(i) is session:
@@ -283,6 +288,11 @@ class TerminalApp(QMainWindow):
         for s in self.sessions:
             idx = self.tab_bar.addTab(s.name)
             self.tab_bar.setTabData(idx, s)
+            # Our own close button: the stock Qt icon is blurry/invisible on the dark theme.
+            # Look the tab up at click time because tabs can be dragged to a new position.
+            button = CloseButton(tooltip=f"Close {s.name}")
+            button.clicked.connect(lambda _c=False, sess=s: self._close_tab_for(sess))
+            self.tab_bar.setTabButton(idx, QTabBar.ButtonPosition.RightSide, button)
         if self.active_session is not None:
             idx = self._tab_index_for_session(self.active_session)
             if idx != -1:
@@ -293,6 +303,9 @@ class TerminalApp(QMainWindow):
         idx = self._tab_index_for_session(session)
         if idx != -1:
             self.tab_bar.setTabText(idx, session.name)
+            button = self.tab_bar.tabButton(idx, QTabBar.ButtonPosition.RightSide)
+            if button is not None:
+                button.setToolTip(f"Close {session.name}")
 
     def new_terminal(self, name: str | None = None) -> TerminalSession:
         idx = len(self.sessions) + 1
@@ -634,10 +647,8 @@ class TerminalApp(QMainWindow):
             label = _SessionLabel(self, s, s.name)
             row_layout.addWidget(label, 1)
 
-            close_btn = QPushButton("\u00d7")
-            close_btn.setFixedWidth(28)
-            close_btn.setStyleSheet("QPushButton { background-color: #70303b; color: white; }")
-            close_btn.clicked.connect(lambda _c, sess=s: self.close_session(sess))
+            close_btn = CloseButton(tooltip=f"Close {s.name}")
+            close_btn.clicked.connect(lambda _c=False, sess=s: self.close_session(sess))
             row_layout.addWidget(close_btn)
 
             item.setSizeHint(row.sizeHint())

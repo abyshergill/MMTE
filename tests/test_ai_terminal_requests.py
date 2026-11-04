@@ -579,6 +579,7 @@ def test_send_query_creates_and_connects_two_named_tabs(monkeypatch, qapp):
     monkeypatch.setattr("gui.ai_assistant_panel.LLMConfigManager", FakeConfig)
     monkeypatch.setattr("gui.ai_assistant_panel.RAGMemoryManager", FakeRag)
     panel = AIAssistantPanel()
+    panel.llm_to_terminal_cb.setChecked(True)  # LLM -> Terminal ON: send_terminal runs without asking
     window = FakeWindow()
     panel.main_window = window
     tool_results = []

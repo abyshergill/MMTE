@@ -69,8 +69,8 @@ APP_TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "terminal_name": {"type": "string", "description": "Connected app tab name, or 'current' for the selected tab."},
-                    "text": {"type": "string", "description": "Exact text or command to send to the remote/device terminal."},
+                    "terminal_name": {"type": "string", "description": "Connected app tab name, 'current' for the selected tab, 'all' for every connected tab, or several names separated by commas."},
+                    "text": {"type": "string", "description": "Exact text or command to send to the remote/device terminal (one command per call)."},
                 },
                 "required": ["terminal_name", "text"],
             },
