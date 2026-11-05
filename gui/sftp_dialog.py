@@ -5,12 +5,12 @@ import threading
 import posixpath
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QDialog, QLabel, QPushButton, QLineEdit, QComboBox, QListWidget,
     QListWidgetItem, QFrame, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QFileDialog, QMessageBox
+    QFileDialog, QMessageBox, QInputDialog
 )
 
 from core.sftp_hops import (
@@ -73,11 +73,43 @@ class AddHopDialog(QDialog):
         self.accept()
 
 
+class DropListWidget(QListWidget):
+    """File list that accepts local files/folders dragged in from the OS file manager."""
+
+    paths_dropped = pyqtSignal(list)
+
+    def __init__(self):
+        super().__init__()
+        self.setAcceptDrops(True)
+        self.setDragDropMode(QListWidget.DragDropMode.DropOnly)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        if not event.mimeData().hasUrls():
+            return super().dropEvent(event)
+        paths = [u.toLocalFile() for u in event.mimeData().urls() if u.toLocalFile()]
+        event.acceptProposedAction()
+        if paths:
+            self.paths_dropped.emit(paths)
+
+
 class SFTPBrowserDialog(QDialog):
     def __init__(self, app, session):
         super().__init__(app)
         self.app = app
         self.session = session
+        self.setAcceptDrops(True)
         self.setWindowTitle(f"Remote Files \u2014 {session.name}")
         self.resize(760, 520)
         self.setModal(False)
@@ -99,11 +131,11 @@ class SFTPBrowserDialog(QDialog):
         self.hop_combo.currentTextChanged.connect(self._on_hop_selected)
         hop_bar.addWidget(self.hop_combo, 1)
         add_hop_btn = QPushButton("+ Add Jump Hop")
-        add_hop_btn.setStyleSheet("QPushButton { background-color: #7656b7; color: white; }")
+        add_hop_btn.setObjectName("GhostBtn")
         add_hop_btn.clicked.connect(self._add_hop_dialog)
         hop_bar.addWidget(add_hop_btn)
         rm_hop_btn = QPushButton("Remove Last Hop")
-        rm_hop_btn.setStyleSheet("QPushButton { background-color: #8a2d3b; color: white; }")
+        rm_hop_btn.setObjectName("DangerBtn")
         rm_hop_btn.clicked.connect(self._remove_hop)
         hop_bar.addWidget(rm_hop_btn)
         root.addLayout(hop_bar)
@@ -124,36 +156,40 @@ class SFTPBrowserDialog(QDialog):
         root.addLayout(top)
 
         actions = QHBoxLayout()
+        newfolder_btn = QPushButton("New Folder...")
+        newfolder_btn.clicked.connect(self._create_folder)
+        actions.addWidget(newfolder_btn)
         upload_btn = QPushButton("Upload File...")
-        upload_btn.setStyleSheet("QPushButton { background-color: #2f6f95; color: white; }")
+        upload_btn.setObjectName("AccentBtn")
         upload_btn.clicked.connect(self._upload_dialog)
         actions.addWidget(upload_btn)
         download_btn = QPushButton("Download Selected")
-        download_btn.setStyleSheet("QPushButton { background-color: #256d55; color: white; }")
+        download_btn.setObjectName("AccentBtn")
         download_btn.clicked.connect(self._download_selected)
         actions.addWidget(download_btn)
         upload_folder_btn = QPushButton("Upload Folder...")
-        upload_folder_btn.setStyleSheet("QPushButton { background-color: #2f6f95; color: white; }")
+        upload_folder_btn.setObjectName("AccentBtn")
         upload_folder_btn.clicked.connect(self._upload_folder_dialog)
         actions.addWidget(upload_folder_btn)
         download_folder_btn = QPushButton("Download Folder")
-        download_folder_btn.setStyleSheet("QPushButton { background-color: #256d55; color: white; }")
+        download_folder_btn.setObjectName("AccentBtn")
         download_folder_btn.clicked.connect(self._download_folder)
         actions.addWidget(download_folder_btn)
         delete_btn = QPushButton("Delete Selected")
-        delete_btn.setStyleSheet("QPushButton { background-color: #8a2d3b; color: white; }")
+        delete_btn.setObjectName("DangerBtn")
         delete_btn.clicked.connect(self._delete_selected)
         actions.addWidget(delete_btn)
         actions.addStretch(1)
         root.addLayout(actions)
 
-        self.list_widget = QListWidget()
+        self.list_widget = DropListWidget()
+        self.list_widget.paths_dropped.connect(self._upload_paths)
         self.list_widget.itemClicked.connect(self._on_item_clicked)
         self.list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
         root.addWidget(self.list_widget, 1)
 
         self.status_label = QLabel("")
-        self.status_label.setStyleSheet("color: palette(placeholder-text);")
+        self.status_label.setObjectName("Hint")
         root.addWidget(self.status_label)
 
     def _set_status(self, text):
@@ -330,6 +366,26 @@ class SFTPBrowserDialog(QDialog):
             self.current_path = posixpath.join(self.current_path.rstrip("/") or "/", data["name"])
             self._refresh()
 
+    def _create_folder(self):
+        name, ok = QInputDialog.getText(self, "New Folder", "Folder name:")
+        name = name.strip()
+        if not ok or not name:
+            return
+        if "/" in name or name in (".", ".."):
+            QMessageBox.warning(self, "Invalid name", "Folder name cannot contain '/' or be '.' / '..'.")
+            return
+        remote_path = posixpath.join(self.current_path.rstrip("/") or "/", name)
+
+        def worker():
+            try:
+                sftp = get_active_sftp(self.session)
+                sftp.mkdir(remote_path)
+                self.app.after(0, lambda: self._set_status(f"Created folder {name}"))
+                self.app.after(0, self._refresh)
+            except Exception as exc:
+                self.app.after(0, lambda e=exc: self._set_status(f"Create folder failed: {e}"))
+        threading.Thread(target=worker, daemon=True).start()
+
     def _upload_dialog(self):
         paths, _ = QFileDialog.getOpenFileNames(self, "Select file(s) to upload")
         if paths:
@@ -349,7 +405,10 @@ class SFTPBrowserDialog(QDialog):
                 remote_path = posixpath.join(target_dir.rstrip("/") or "/", name)
                 try:
                     self.app.after(0, lambda n=name: self._set_status(f"Uploading {n}..."))
-                    sftp.put(lp, remote_path)
+                    if os.path.isdir(lp):
+                        upload_folder(sftp, lp, remote_path)
+                    else:
+                        sftp.put(lp, remote_path)
                 except Exception as exc:
                     self.app.after(0, lambda n=name, e=exc: self._set_status(f"Failed to upload {n}: {e}"))
                     return

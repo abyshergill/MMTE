@@ -361,17 +361,14 @@ class TerminalSession:
         self.log_file = file_path.open("a", encoding="utf-8", errors="replace")
         self.log_enabled = True
         self.log_paused = False
-        self.incoming.put(f"\r\n[Logging started -> {file_path}]\r\n")
 
     def pause_logging(self) -> None:
         if self.log_enabled and not self.log_paused:
             self.log_paused = True
-            self.incoming.put("\r\n[Logging paused]\r\n")
 
     def resume_logging(self) -> None:
         if self.log_enabled and self.log_paused:
             self.log_paused = False
-            self.incoming.put("\r\n[Logging resumed]\r\n")
 
     def disable_logging(self, file_path: "Path | str | None" = None) -> None:
         if file_path is not None and self.log_file is not None:
@@ -391,8 +388,6 @@ class TerminalSession:
                 self.log_file.close()
         finally:
             self.log_file = None
-        if was_enabled:
-            self.incoming.put("\r\n[Logging stopped]\r\n")
 
     def close(self) -> None:
         self.close_sftp_hops()

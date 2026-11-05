@@ -4,6 +4,9 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+from pathlib import Path
+
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
 from core.config import CONFIG_DIR, LOG_DIR
@@ -17,6 +20,9 @@ def main():
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     app = QApplication(sys.argv)
     apply_dark_theme(app)
+    icon = Path(__file__).resolve().parent / "assets" / "icon.svg"
+    if icon.exists():
+        app.setWindowIcon(QIcon(str(icon)))
     app.setStyleSheet(APP_STYLESHEET)
     window = TerminalApp()
     window.show()

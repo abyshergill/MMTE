@@ -10,7 +10,7 @@ import tempfile
 import threading
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import QSize, Qt, QTimer
 from PyQt6.QtGui import QFont, QIcon
 from PyQt6.QtWidgets import (
     QApplication,
@@ -61,7 +61,7 @@ class TerminalApp(QMainWindow):
         self.resize(1340, 780)
         self.setMinimumSize(1020, 620)
 
-        icon_path = Path("assets/icon.ico")
+        icon_path = Path(__file__).resolve().parent.parent / "assets" / "icon.svg"
         if icon_path.exists():
             try:
                 self.setWindowIcon(QIcon(str(icon_path)))
@@ -651,7 +651,8 @@ class TerminalApp(QMainWindow):
             close_btn.clicked.connect(lambda _c=False, sess=s: self.close_session(sess))
             row_layout.addWidget(close_btn)
 
-            item.setSizeHint(row.sizeHint())
+            hint = row.sizeHint()
+            item.setSizeHint(QSize(hint.width(), max(hint.height(), 44)))
             self.session_list.addItem(item)
             self.session_list.setItemWidget(item, row)
             self.session_list_rows[s] = item
@@ -851,7 +852,15 @@ class TerminalApp(QMainWindow):
     def open_sftp_dialog(self):
         s = self.current_session()
         if not s or not s.connection or s.connection.label != "SSH":
-            QMessageBox.warning(self, "SSH required", "The Files browser requires an active SSH connection.")
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setWindowTitle("SSH required")
+            box.setText("The Files browser requires an active SSH connection.")
+            login_btn = box.addButton("SSH Login", QMessageBox.ButtonRole.AcceptRole)
+            box.addButton(QMessageBox.StandardButton.Ok)
+            box.exec()
+            if box.clickedButton() is login_btn:
+                self.connect_ssh_dialog()
             return
         SFTPBrowserDialog(self, s)
 

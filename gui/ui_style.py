@@ -17,25 +17,25 @@ Semantic object names understood here:
 from core.theme import TERMINAL_ACCENT, TERMINAL_BG, TERMINAL_FG  # noqa: F401  (re-exported for callers)
 
 TOKENS = {
-    "bg0": "#0d1117",       # window / deepest surface
-    "bg1": "#141a22",       # panels, sidebar, menus
-    "bg2": "#1a222c",       # inputs, cards
-    "bg3": "#232d39",       # hover
-    "line": "#27313d",      # hairlines
-    "line2": "#344253",     # stronger borders
+    "bg0": "#0b0e14",       # window / deepest surface
+    "bg1": "#11151d",       # panels, sidebar, menus
+    "bg2": "#171c26",       # inputs, cards
+    "bg3": "#212838",       # hover
+    "line": "#222a38",      # hairlines
+    "line2": "#323c52",     # stronger borders
     "text": "#e6edf3",
     "dim": "#9aa8b6",
     "mute": "#6b7a89",
-    "accent": TERMINAL_ACCENT,
-    "accent_hi": "#5fd8c9",
-    "accent_fg": "#04201c",
+    "accent": "#7c8cff",
+    "accent_hi": "#a0acff",
+    "accent_fg": "#0a0d1f",
     "info": "#5aa9ff",
     "ok": "#4cc38a",
     "warn": "#e0a93b",
     "err": "#ef6a73",
     "err_bg": "#33191d",
     "err_line": "#6b2f39",
-    "select": "#1f4f5a",
+    "select": "#2a3566",
     "term_bg": TERMINAL_BG,
     "term_fg": TERMINAL_FG,
     "mono": "'Cascadia Mono', 'JetBrains Mono', Consolas, 'SF Mono', Menlo, 'DejaVu Sans Mono', monospace",
@@ -71,7 +71,7 @@ QMenuBar::item:selected { background-color: @bg3@; color: @accent@; }
 QMenuBar::item:pressed { background-color: @bg3@; }
 QMenu {
     background-color: @bg1@; color: @text@; border: 1px solid @line2@;
-    padding: 6px; border-radius: 8px;
+    padding: 6px; border-radius: 10px;
 }
 QMenu::item { padding: 7px 30px 7px 16px; border-radius: 5px; }
 QMenu::item:selected { background-color: @bg3@; color: @accent@; }
@@ -89,21 +89,23 @@ QPushButton#CollapseBtn {
 }
 QPushButton#CollapseBtn:hover { background-color: @bg3@; color: @accent@; }
 QListWidget#SessionList { background-color: transparent; border: none; outline: none; }
+QListWidget#SessionList::item { padding: 0; margin: 2px 0; }
+QListWidget#SessionList::item:selected { background-color: @select@; border: 1px solid @accent@; }
 
 /* --- Buttons --- */
 QPushButton {
     background-color: @bg2@; color: @text@; border: 1px solid @line2@;
-    border-radius: 6px; padding: 6px 14px; min-height: 18px;
+    border-radius: 8px; padding: 7px 16px; min-height: 20px;
 }
 QPushButton:hover { background-color: @bg3@; border-color: @accent@; }
 QPushButton:pressed { background-color: @bg1@; }
 QPushButton:focus { border-color: @accent@; }
 QPushButton:disabled { color: @mute@; border-color: @line@; background-color: @bg1@; }
 QPushButton#AccentBtn, QPushButton#PrimaryBtn {
-    background-color: @accent@; color: @accent_fg@; border: 1px solid @accent@; font-weight: 600;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 @accent@, stop:1 #5fd0c4); color: @accent_fg@; border: 1px solid @accent@; font-weight: 600;
 }
-QPushButton#AccentBtn:hover, QPushButton#PrimaryBtn:hover { background-color: @accent_hi@; border-color: @accent_hi@; }
-QPushButton#AccentBtn:pressed, QPushButton#PrimaryBtn:pressed { background-color: @accent@; }
+QPushButton#AccentBtn:hover, QPushButton#PrimaryBtn:hover { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 @accent_hi@, stop:1 #7fe0d5); border-color: @accent_hi@; }
+QPushButton#AccentBtn:pressed, QPushButton#PrimaryBtn:pressed { background: @accent@; }
 QPushButton#AccentBtn:disabled, QPushButton#PrimaryBtn:disabled {
     background-color: @bg2@; color: @mute@; border-color: @line@;
 }
@@ -115,7 +117,7 @@ QPushButton#GhostBtn:hover { background-color: @bg3@; color: @text@; border-colo
 /* --- Inputs --- */
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTextEdit, QPlainTextEdit {
     background-color: @bg2@; color: @text@; border: 1px solid @line2@;
-    border-radius: 6px; padding: 5px 8px;
+    border-radius: 8px; padding: 6px 10px;
     selection-background-color: @select@; selection-color: @text@;
 }
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus,
@@ -154,7 +156,7 @@ QListWidget, QListView, QTreeView, QTreeWidget, QTableView, QTableWidget {
     alternate-background-color: @bg1@; gridline-color: @line@;
     selection-background-color: @select@; selection-color: @text@;
 }
-QListWidget::item { padding: 5px 6px; border-radius: 4px; }
+QListWidget::item { padding: 6px 8px; border-radius: 6px; }
 QListWidget::item:hover { background-color: @bg3@; }
 QListWidget::item:selected { background-color: @select@; color: @text@; }
 QHeaderView::section {
@@ -232,7 +234,7 @@ QTextEdit#AIChat {
 QTextEdit#AIPrompt { background-color: @bg2@; border-radius: 8px; padding: 8px; font-size: 13px; }
 QLabel#AIStatus { color: @warn@; font-size: 11px; background: transparent; }
 QLabel#ModeBadge { border-radius: 9px; padding: 2px 9px; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
-QLabel#ModeBadge[mode="auto"] { background-color: #12372f; color: @accent@; border: 1px solid #1d5c50; }
+QLabel#ModeBadge[mode="auto"] { background-color: #1c2250; color: @accent@; border: 1px solid #3a4590; }
 QLabel#ModeBadge[mode="ask"]  { background-color: #3a2f12; color: @warn@;   border: 1px solid #5c4a1d; }
 
 /* --- Run-in-terminal dialog --- */

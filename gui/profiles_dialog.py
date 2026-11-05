@@ -1,3 +1,4 @@
+from PyQt6.QtCore import QSize
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QDialog,
@@ -57,14 +58,15 @@ class ProfilesDialog(QDialog):
             item = QListWidgetItem()
             row = QWidget()
             row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(6, 4, 6, 4)
+            row_layout.setContentsMargins(8, 6, 8, 6)
+            row.setMinimumHeight(52)
             row_layout.addWidget(QLabel(f"{n} ({pf.get('username','')}@{pf.get('host','')})"), 1)
             del_btn = QPushButton("Delete")
-            del_btn.setFixedWidth(70)
-            del_btn.setStyleSheet("QPushButton { background-color: #8a2d3b; color: white; }")
+            del_btn.setObjectName("DangerBtn")
+            del_btn.setFixedSize(84, 36)
             del_btn.clicked.connect(lambda _c, name=n: (self.ssh_store.delete(name), self.ref_ssh()))
             row_layout.addWidget(del_btn)
-            item.setSizeHint(row.sizeHint())
+            item.setSizeHint(QSize(row.sizeHint().width(), 56))
             self.ssh_box.addItem(item)
             self.ssh_box.setItemWidget(item, row)
 
@@ -74,13 +76,14 @@ class ProfilesDialog(QDialog):
             item = QListWidgetItem()
             row = QWidget()
             row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(6, 4, 6, 4)
+            row_layout.setContentsMargins(8, 6, 8, 6)
+            row.setMinimumHeight(52)
             row_layout.addWidget(QLabel(f"{n} ({pf.get('host','')}:{pf.get('port','')})"), 1)
             del_btn = QPushButton("Delete")
-            del_btn.setFixedWidth(70)
-            del_btn.setStyleSheet("QPushButton { background-color: #8a2d3b; color: white; }")
+            del_btn.setObjectName("DangerBtn")
+            del_btn.setFixedSize(84, 36)
             del_btn.clicked.connect(lambda _c, name=n: (self.telnet_store.delete(name), self.ref_telnet()))
             row_layout.addWidget(del_btn)
-            item.setSizeHint(row.sizeHint())
+            item.setSizeHint(QSize(row.sizeHint().width(), 56))
             self.telnet_box.addItem(item)
             self.telnet_box.setItemWidget(item, row)
