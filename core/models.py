@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import pyte
 from PyQt6.QtGui import QTextCharFormat, QColor, QFont, QTextCursor
 from core.theme import TERMINAL_BG, TERMINAL_FG, TERMINAL_ACCENT, PALETTE
+from core.terminal_highlight import FORMATS as HIGHLIGHT_FORMATS, highlight_spans
 
 if TYPE_CHECKING:
     from gui.main_window import TerminalApp
@@ -60,6 +61,14 @@ class TerminalSession:
     script_name: str = ""
     script_stop_event: threading.Event = field(default_factory=threading.Event)
     script_pause_event: threading.Event = field(default_factory=_running_event)
+    # Colourise plain (default-colour) output with core.terminal_highlight.
+    highlight: bool = True
+    # Active core.macro_recorder.MacroRecorder while "Record Macro" is on for this terminal.
+    recorder: object | None = None
+    # What the user typed since the last Enter. ``typed_line_dirty`` is set once history,
+    # tab completion or cursor keys were used; the command is then read back from the screen.
+    typed_line: str = ""
+    typed_line_dirty: bool = False
 
     def __post_init__(self):
         self.screen = pyte.HistoryScreen(self.cols, self.rows, history=5000, ratio=0.5)
@@ -155,6 +164,15 @@ class TerminalSession:
             fmt.setForeground(QColor(color))
             self._format_cache[f"fg_{name}"] = fmt
 
+        for name, (color, is_bold, underline) in HIGHLIGHT_FORMATS.items():
+            fmt = QTextCharFormat()
+            fmt.setForeground(QColor(color))
+            if is_bold:
+                fmt.setFontWeight(QFont.Weight.Bold)
+            if underline:
+                fmt.setFontUnderline(True)
+            self._format_cache[f"hl_{name}"] = fmt
+
     def _tag_for_char(self, char) -> str | None:
         if getattr(char, "reverse", False):
             return "reverse"
@@ -198,13 +216,26 @@ class TerminalSession:
         cursor.movePosition(QTextCursor.MoveOperation.Start)
         default_fmt = self._format_cache[None]
 
+        highlight = self.highlight and not self.alt_screen_active
         for row_idx, row in enumerate(display_rows):
             run_text = ""
             run_tag: str | None = None
             first_run = True
+            overlay: list[str | None] | None = None
+            if highlight:
+                line = "".join(row[x].data or " " for x in range(cols))
+                spans = highlight_spans(line)
+                if spans:
+                    overlay = [None] * cols
+                    for start, end, hl_tag in spans:
+                        name = f"hl_{hl_tag}"
+                        for x in range(start, min(end, cols)):
+                            overlay[x] = name
             for x in range(cols):
                 char = row[x]
                 tag = self._tag_for_char(char)
+                if overlay is not None and overlay[x] is not None and (tag is None or tag == "bold"):
+                    tag = overlay[x]
                 ch = char.data or " "
                 if tag != run_tag:
                     if run_text or not first_run:

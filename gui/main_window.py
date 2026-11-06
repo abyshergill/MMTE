@@ -8,6 +8,8 @@ import re
 import sys
 import tempfile
 import threading
+import uuid
+from time import monotonic as time_monotonic
 from pathlib import Path
 
 from PyQt6.QtCore import QSize, Qt, QTimer
@@ -29,24 +31,29 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QStackedWidget,
     QTabBar,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from core.config import APP_NAME, LOG_DIR, PROFILES_FILE, TELNET_PROFILES_FILE
+from core.app_settings import AppSettings
+from core.config import APP_NAME, CONFIG_DIR, LOG_DIR, PROFILES_FILE, TELNET_PROFILES_FILE
 from core.connections import BaseConnection, SSHConnection, SerialConnection, TelnetConnection
 from core.models import ScriptStopped, TerminalSession
 from core.profile_store import ProfileStore
 from core.script_engine import TeraTermMacroRunner, execute_python_script_sync
-from core.sftp_hops import get_active_sftp
+from core.macro_recorder import MacroRecorder, extract_command, is_secret_prompt, parse_editor_command
+from core.sftp_hops import get_active_sftp, get_hops
 from core.theme import TERMINAL_BG
+from gui import icons
 from gui.close_button import CloseButton
 from gui.daw_manager import MultiScriptDialog
 from gui.dialogs import RenameDialog, SamplesDialog, SerialDialog, SSHDialog, TelnetDialog
 from gui.helpers import _AfterBridge, set_hand_cursor
 from gui.profiles_dialog import ProfilesDialog
 from gui.rag_dialog import RAGManagementDialog
-from gui.session_label import _SessionLabel
+from gui.macro_dialog import MacroRecordDialog
+from gui.session_label import InlineRenameEdit, _SessionLabel
 from gui.sftp_dialog import SFTPBrowserDialog
 from gui.terminal_widget import TerminalWidget
 from gui.ui_style import APP_STYLESHEET
@@ -69,6 +76,9 @@ class TerminalApp(QMainWindow):
                 pass
 
         self._after_bridge = _AfterBridge()
+        self.settings = AppSettings()
+        self._text_editor = None
+        self._rec_blink_on = True
 
         self.profile_store = ProfileStore(PROFILES_FILE)
         self.telnet_profile_store = ProfileStore(TELNET_PROFILES_FILE)
@@ -82,6 +92,10 @@ class TerminalApp(QMainWindow):
         self._poll_timer = QTimer(self)
         self._poll_timer.timeout.connect(self.poll_queues)
         self._poll_timer.start(40)
+
+        self._rec_timer = QTimer(self)
+        self._rec_timer.timeout.connect(self._blink_recording)
+        self._rec_timer.start(600)
 
     def after(self, ms, callback, *args, **kwargs):
         if threading.current_thread() is threading.main_thread():
@@ -127,9 +141,24 @@ class TerminalApp(QMainWindow):
 
         util_menu = menubar.addMenu("&Utility")
         util_menu.addAction("Files (SFTP Browser)...", self.open_sftp_dialog)
+        util_menu.addAction("Text Editor...", self.open_text_editor)
         util_menu.addAction("Saved Profiles...", self.manage_profiles)
         util_menu.addSeparator()
+        self.record_macro_action = util_menu.addAction("Record Actions | Macro...", self.open_macro_dialog)
+        self.record_macro_action.setIcon(icons.record_icon(size=14))
+        self.stop_macro_action = util_menu.addAction("Stop Macro Recording", self.stop_current_macro)
+        self.stop_macro_action.setIcon(icons.stop_icon(size=14))
+        self.stop_macro_action.setEnabled(False)
+        util_menu.addSeparator()
         util_menu.addAction("Clear Terminal", self.clear_terminal)
+        self.highlight_action = util_menu.addAction("Terminal Syntax Highlighting", self.toggle_syntax_highlighting)
+        self.highlight_action.setCheckable(True)
+        self.highlight_action.setChecked(bool(self.settings.get("syntax_highlighting", True)))
+        self.intercept_action = util_menu.addAction(
+            "Open vi / vim / nano in Built-in Editor", self.toggle_editor_interception
+        )
+        self.intercept_action.setCheckable(True)
+        self.intercept_action.setChecked(bool(self.settings.get("intercept_editors", True)))
         util_menu.addSeparator()
         self.start_logging_action = util_menu.addAction("Start Logging...", self.start_logging)
         self.pause_logging_action = util_menu.addAction("\u23f8 Pause Logging", self.toggle_pause_logging)
@@ -146,6 +175,8 @@ class TerminalApp(QMainWindow):
             self.ai_panel = AIAssistantPanel(self)
             self.ai_dock.setWidget(self.ai_panel)
             self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.ai_dock)
+            # Hidden at launch; open it from AI > AI Assistant Window.
+            self.ai_dock.hide()
 
             ai_menu = menubar.addMenu("&AI")
             ai_window_action = self.ai_dock.toggleViewAction()
@@ -238,6 +269,11 @@ class TerminalApp(QMainWindow):
         self.header_label.setFont(header_font)
         header_row.addWidget(self.header_label)
         header_row.addStretch(1)
+        self.rec_badge = QLabel("")
+        self.rec_badge.setObjectName("RecBadge")
+        self.rec_badge.setToolTip("Macro recording is on. Stop it from Utility > Stop Macro Recording.")
+        self.rec_badge.hide()
+        header_row.addWidget(self.rec_badge)
         self.script_status_label = QLabel("")
         self.script_status_label.setStyleSheet("color: #d99a2b; font-weight: bold; padding: 2px 8px;")
         header_row.addWidget(self.script_status_label)
@@ -249,7 +285,24 @@ class TerminalApp(QMainWindow):
         self.tab_bar.setMovable(True)
         self.tab_bar.currentChanged.connect(self._on_tab_changed)
         self.tab_bar.tabCloseRequested.connect(self._on_tab_closed)
-        content_layout.addWidget(self.tab_bar)
+        self.tab_bar.tabBarDoubleClicked.connect(self._begin_tab_rename)
+        self.tab_bar.setToolTip("Double-click a tab to rename it")
+
+        tab_row = QHBoxLayout()
+        tab_row.setContentsMargins(0, 0, 0, 0)
+        tab_row.setSpacing(0)
+        tab_row.addWidget(self.tab_bar, 0, Qt.AlignmentFlag.AlignBottom)
+        self.new_tab_btn = QToolButton()
+        self.new_tab_btn.setObjectName("NewTabBtn")
+        self.new_tab_btn.setIcon(icons.plus_icon(size=14))
+        self.new_tab_btn.setIconSize(QSize(14, 14))
+        self.new_tab_btn.setFixedSize(28, 28)
+        self.new_tab_btn.setToolTip("New terminal (Ctrl+Shift+T)")
+        self.new_tab_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.new_tab_btn.clicked.connect(lambda: self.new_terminal())
+        tab_row.addWidget(self.new_tab_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+        tab_row.addStretch(1)
+        content_layout.addLayout(tab_row)
 
         self.stack = QStackedWidget()
         content_layout.addWidget(self.stack, 1)
@@ -286,7 +339,7 @@ class TerminalApp(QMainWindow):
         while self.tab_bar.count() > 0:
             self.tab_bar.removeTab(0)
         for s in self.sessions:
-            idx = self.tab_bar.addTab(s.name)
+            idx = self.tab_bar.addTab(self._tab_title(s))
             self.tab_bar.setTabData(idx, s)
             # Our own close button: the stock Qt icon is blurry/invisible on the dark theme.
             # Look the tab up at click time because tabs can be dragged to a new position.
@@ -299,10 +352,35 @@ class TerminalApp(QMainWindow):
                 self.tab_bar.setCurrentIndex(idx)
         self.tab_bar.blockSignals(False)
 
+    @staticmethod
+    def _tab_title(session) -> str:
+        return ("\u25cf " if session.recorder else "") + session.name
+
+    def _begin_tab_rename(self, index: int) -> None:
+        """Double-click on a tab: rename it in place."""
+        session = self.tab_bar.tabData(index) if index >= 0 else None
+        if session is None:
+            return
+        editor = InlineRenameEdit(self.tab_bar, session.name)
+        editor.setGeometry(self.tab_bar.tabRect(index).adjusted(4, 3, -26, -3))
+        editor.committed.connect(lambda text, sess=session: self._finish_tab_rename(sess, text))
+        editor.show()
+        editor.setFocus()
+        editor.selectAll()
+        self._tab_rename_editor = editor
+
+    def _finish_tab_rename(self, session, text: str) -> None:
+        if not text or session not in self.sessions or text == session.name:
+            return
+        session.name = text
+        self._update_tab_text(session)
+        self.select_session(session)
+        self.refresh_session_list()
+
     def _update_tab_text(self, session):
         idx = self._tab_index_for_session(session)
         if idx != -1:
-            self.tab_bar.setTabText(idx, session.name)
+            self.tab_bar.setTabText(idx, self._tab_title(session))
             button = self.tab_bar.tabButton(idx, QTabBar.ButtonPosition.RightSide)
             if button is not None:
                 button.setToolTip(f"Close {session.name}")
@@ -318,6 +396,7 @@ class TerminalApp(QMainWindow):
         frame_layout.addWidget(terminal)
 
         session = TerminalSession(app=self, name=t_name, frame=frame, terminal=terminal)
+        session.highlight = bool(self.settings.get("syntax_highlighting", True))
         terminal.session = session
 
         self.sessions.append(session)
@@ -361,6 +440,9 @@ class TerminalApp(QMainWindow):
         return False
 
     def close_session_direct(self, s: TerminalSession):
+        if s.recorder is not None:
+            # Don't lose a recording because its tab was closed: hand it to the editor unsaved.
+            self.stop_macro_recording(s, ask_to_save=False)
         job = getattr(s, "_resize_job", None)
         if job:
             self.after_cancel(job)
@@ -463,6 +545,9 @@ class TerminalApp(QMainWindow):
         if ctrl and shift and letter == "v":
             self.paste_to_terminal(session)
             return True
+        if ctrl and shift and letter == "t":
+            self.new_terminal()
+            return True
 
         if shift and key == Qt.Key.Key_PageUp:
             session.scroll_history(session.rows - 2)
@@ -478,9 +563,12 @@ class TerminalApp(QMainWindow):
                     return True
                 ctrl_map = {chr(c + 96): chr(c) for c in range(1, 27)}
                 if letter and letter in ctrl_map:
+                    self._track_control_key(session, ctrl_map[letter])
                     session.send(ctrl_map[letter])
                     return True
 
+            if key in (Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down):
+                session.typed_line_dirty = True
             if key == Qt.Key.Key_Left:
                 session.send("\x1b[D")
                 return True
@@ -498,10 +586,13 @@ class TerminalApp(QMainWindow):
                 cursor = session.screen.cursor
                 if session.prompt_row == cursor.y and cursor.x <= session.prompt_col:
                     return True
+                session.typed_line = session.typed_line[:-1]
                 session.send("\x7f")
                 return True
 
             if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                if self._on_enter_pressed(session):
+                    return True
                 session.send("\r")
                 session.awaiting_prompt = True
                 return True
@@ -516,10 +607,12 @@ class TerminalApp(QMainWindow):
                 Qt.Key.Key_PageDown: "\x1b[6~",
             }
             if key in special:
+                session.typed_line_dirty = True
                 session.send(special[key])
                 return True
 
             if text and len(text) == 1 and ord(text) >= 32:
+                session.typed_line += text
                 session.send(text)
                 return True
 
@@ -564,6 +657,7 @@ class TerminalApp(QMainWindow):
         try:
             text = QApplication.clipboard().text()
             if session.connection:
+                self._track_pasted_text(session, text)
                 session.send(text)
             else:
                 session.append(text)
@@ -620,6 +714,7 @@ class TerminalApp(QMainWindow):
         self.header_label.setText(self._status_text(session))
         self._update_script_status_ui(session)
         self._update_logging_menu_ui(session)
+        self._update_recording_ui(session)
 
     def _highlight_session_list(self):
         for s, item in self.session_list_rows.items():
@@ -668,13 +763,15 @@ class TerminalApp(QMainWindow):
         else:
             log_state = "OFF"
         base = f"{s.name}  \u00b7  {s.connected_label}  \u00b7  Logging: {log_state}"
+        if s.recorder is not None:
+            base += "  \u00b7  Macro: REC"
         if s.scroll_offset:
             base += f"  \u00b7  Scrollback ({s.scroll_offset} lines back)"
         return base
 
-    def connect_ssh_dialog(self):
+    def connect_ssh_dialog(self, *_signal_args, profile: str | None = None):
         s = self.current_session() or self.new_terminal()
-        d = SSHDialog(self)
+        d = SSHDialog(self, profile=profile)
         if d.exec() != QDialog.DialogCode.Accepted or not d.result:
             return
         if d.result["save"]:
@@ -702,9 +799,9 @@ class TerminalApp(QMainWindow):
                 f"Serial {d.result['port']} @ {d.result['baud']}",
             )
 
-    def connect_telnet_dialog(self):
+    def connect_telnet_dialog(self, *_signal_args, profile: str | None = None):
         s = self.current_session() or self.new_terminal()
-        d = TelnetDialog(self)
+        d = TelnetDialog(self, profile=profile)
         if d.exec() != QDialog.DialogCode.Accepted or not d.result:
             return
         if d.result["save"]:
@@ -869,6 +966,7 @@ class TerminalApp(QMainWindow):
             return
         self.select_session(session)
         if session.connection:
+            self._track_pasted_text(session, text)
             session.send(text)
         else:
             session.append(text)
@@ -1045,6 +1143,7 @@ class TerminalApp(QMainWindow):
                 self.header_label.setText(self._status_text(s))
                 self._update_script_status_ui(s)
                 self._update_logging_menu_ui(s)
+                self._update_recording_ui(s)
 
     def _update_script_status_ui(self, s: TerminalSession) -> None:
         if s.script_running:
@@ -1071,7 +1170,283 @@ class TerminalApp(QMainWindow):
         if s and s.script_running:
             s.request_stop_script()
 
+    # --- preferences ---------------------------------------------------------------
+    def toggle_syntax_highlighting(self, checked: bool | None = None) -> None:
+        enabled = self.highlight_action.isChecked() if checked is None else bool(checked)
+        self.settings.set("syntax_highlighting", enabled)
+        for s in self.sessions:
+            s.highlight = enabled
+            s.render()
+
+    def toggle_editor_interception(self, checked: bool | None = None) -> None:
+        enabled = self.intercept_action.isChecked() if checked is None else bool(checked)
+        self.settings.set("intercept_editors", enabled)
+
+    # --- built-in text editor ----------------------------------------------------------
+    def text_editor(self):
+        if self._text_editor is None:
+            from gui.text_editor import TextEditorWindow
+
+            self._text_editor = TextEditorWindow(self, self.settings)
+        return self._text_editor
+
+    def open_text_editor(self) -> None:
+        editor = self.text_editor()
+        if not editor.documents:
+            editor.new_document()
+        editor.show_and_raise()
+
+    # --- typed-line tracking ---------------------------------------------------------
+    def _track_control_key(self, session: TerminalSession, char: str) -> None:
+        if char == "\x15":  # Ctrl+U clears the line
+            session.typed_line, session.typed_line_dirty = "", False
+            return
+        if char in ("\x03", "\x04", "\x1a", "\x1c", "\x0c"):
+            if session.recorder is not None and not session.alt_screen_active:
+                session.recorder.record_keys(char)
+            if char != "\x0c":
+                session.typed_line, session.typed_line_dirty = "", False
+            return
+        session.typed_line_dirty = True  # Ctrl+A/E/W/R ... edit the line in ways we don't model
+
+    def _track_pasted_text(self, session: TerminalSession, text: str) -> None:
+        pieces = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        for complete in pieces[:-1]:
+            session.typed_line += complete
+            if session.recorder is not None and not session.alt_screen_active:
+                command = session.typed_line if not session.typed_line_dirty else extract_command(
+                    self._cursor_line(session)
+                )
+                session.recorder.record_line(command)
+            session.typed_line, session.typed_line_dirty = "", False
+        session.typed_line += pieces[-1]
+
+    @staticmethod
+    def _cursor_line(session: TerminalSession) -> str:
+        try:
+            return session.screen.display[session.screen.cursor.y]
+        except Exception:
+            return ""
+
+    def _on_enter_pressed(self, session: TerminalSession) -> bool:
+        """Runs before Enter is sent. Records the command and may open vi/nano in the editor.
+
+        Returns True when the Enter key was consumed (the command will not run remotely).
+        """
+        if session.alt_screen_active:  # inside a remote full-screen program
+            session.typed_line, session.typed_line_dirty = "", False
+            return False
+        screen_line = self._cursor_line(session)
+        secret = is_secret_prompt(screen_line)
+        if secret or not session.typed_line_dirty:
+            command = session.typed_line.strip() if not secret else ""
+        else:
+            command = extract_command(screen_line)
+        session.typed_line, session.typed_line_dirty = "", False
+
+        if not secret and command and self.settings.get("intercept_editors", True):
+            parsed = parse_editor_command(command)
+            if parsed and session.connection is not None and getattr(session.connection, "label", "") == "SSH":
+                if session.recorder is not None:
+                    session.recorder.record_note(f"opened in the built-in editor: {command}")
+                self._open_files_from_terminal(session, command, *parsed)
+                return True
+
+        if session.recorder is not None:
+            session.recorder.record_line(command, secret=secret, prompt=screen_line.strip()[-60:])
+        return False
+
+    def _open_files_from_terminal(self, session: TerminalSession, command: str, sudo: bool, files: list[str]) -> None:
+        """``vim file`` typed in an SSH terminal: edit the file(s) here over SFTP instead."""
+        session.send("\x15")  # wipe the typed command from the remote shell's input line
+        needs_cwd = any(not f.startswith(("/", "~")) for f in files)
+        token = uuid.uuid4().hex[:10]
+        if needs_cwd:
+            # Ask the shell for its working directory; the leading space keeps it out of history.
+            session.send(f" printf '__MMTE_CWD_{token}__%s__END\\n' \"$PWD\"\r")
+        label = session.connected_label
+        self.status_label.setText(f"Opening {', '.join(files)} in the built-in editor ...")
+
+        def sftp_for_shell():
+            # Hop 0 is the host the terminal's shell runs on (later hops are SFTP-browser jumps).
+            return get_hops(session)[0]["sftp"]
+
+        def worker():
+            try:
+                sftp = sftp_for_shell()
+                home = sftp.normalize(".")
+                cwd = home
+                if needs_cwd:
+                    found = self._wait_for_cwd(session, token, timeout=6.0)
+                    if found is None:
+                        raise TimeoutError("could not read the shell's working directory")
+                    cwd = found
+                paths = [self._resolve_remote_path(f, cwd, home) for f in files]
+            except Exception as exc:
+                message = str(exc) or exc.__class__.__name__
+                self.after(0, lambda: self._editor_fallback(session, command, message))
+                return
+
+            def open_all():
+                editor = self.text_editor()
+                for path in paths:
+                    editor.open_remote(
+                        sftp_for_shell,
+                        path,
+                        label=label,
+                        on_saved=lambda doc: self.status_label.setText(f"Saved {doc.remote_path} ({label})"),
+                        on_error=lambda msg, p=path: self._editor_fallback(session, command, f"{p}: {msg}"),
+                        create_if_missing=True,
+                    )
+                note = "  (opened with your SSH login; saving may need write permission)" if sudo else ""
+                self.status_label.setText(f"Editing {', '.join(paths)} in the built-in editor{note}")
+
+            self.after(0, open_all)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    @staticmethod
+    def _resolve_remote_path(path: str, cwd: str, home: str) -> str:
+        if path == "~":
+            return home
+        if path.startswith("~/"):
+            return posixpath.normpath(posixpath.join(home, path[2:]))
+        if path.startswith("/"):
+            return posixpath.normpath(path)
+        return posixpath.normpath(posixpath.join(cwd, path))
+
+    @staticmethod
+    def _wait_for_cwd(session: TerminalSession, token: str, timeout: float) -> str | None:
+        pattern = re.compile(rf"__MMTE_CWD_{token}__(/[^\r\n]*?)__END")
+        deadline = time_monotonic() + timeout
+        with session.recv_condition:
+            while True:
+                match = pattern.search(session.recv_buffer)
+                if match:
+                    return match.group(1)
+                remaining = deadline - time_monotonic()
+                if remaining <= 0:
+                    return None
+                session.recv_condition.wait(min(0.2, remaining))
+
+    def _editor_fallback(self, session: TerminalSession, command: str, reason: str) -> None:
+        self.status_label.setText(f"Built-in editor: {reason}")
+        if session not in self.sessions or session.connection is None:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Open in terminal instead?",
+            f"The file could not be opened in the built-in editor:\n\n{reason}\n\n"
+            f"Run '{command}' in the terminal instead?",
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            session.send(command + "\r")
+
+    # --- macro recording ----------------------------------------------------------------
+    def open_macro_dialog(self) -> None:
+        if not self.sessions:
+            self.new_terminal()
+        MacroRecordDialog(self).exec()
+
+    def stop_current_macro(self) -> None:
+        s = self.current_session()
+        if s is not None and s.recorder is not None:
+            self.stop_macro_recording(s)
+
+    @staticmethod
+    def _connect_hint(session: TerminalSession) -> str:
+        conn = session.connection
+        label = getattr(conn, "label", "")
+        if label == "SSH":
+            return f"connect_ssh({conn.host!r}, {conn.username!r}, input('SSH password for {conn.username}@{conn.host}'), port={conn.port})"
+        if label == "Telnet":
+            return f"connect_telnet({conn.host!r}, port={conn.port})"
+        if label == "Serial":
+            return f"connect_serial({conn.port!r}, {getattr(conn, 'baudrate', 115200)})"
+        return ""
+
+    def start_macro_recording(self, session: TerminalSession) -> None:
+        if session not in self.sessions or session.recorder is not None:
+            return
+        session.recorder = MacroRecorder(
+            session_name=session.name,
+            connection_label=session.connected_label,
+            connect_hint=self._connect_hint(session),
+        )
+        session.typed_line, session.typed_line_dirty = "", False
+        session.incoming.put("\r\n[Macro recording started - Utility > Stop Macro Recording to finish]\r\n")
+        self._update_tab_text(session)
+        self.select_session(session)
+        self.status_label.setText(f"Recording macro on {session.name}")
+
+    def stop_macro_recording(
+        self, session: TerminalSession, ask_to_save: bool = True, open_in_editor: bool = True
+    ) -> str | None:
+        """Stop recording, generate the Python script and save / open it. Returns the script."""
+        recorder = session.recorder
+        if recorder is None:
+            return None
+        session.recorder = None
+        script = recorder.to_python()
+        if session in self.sessions:
+            session.incoming.put(f"\r\n[Macro recording stopped - {recorder.command_count} command(s)]\r\n")
+            self._update_tab_text(session)
+            if session is self.active_session:
+                self._update_recording_ui(session)
+                self.header_label.setText(self._status_text(session))
+
+        macro_dir = CONFIG_DIR / "macros"
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", session.name).strip("_") or "terminal"
+        default_path = macro_dir / f"macro_{safe}_{recorder.started_wall:%Y%m%d_%H%M%S}.py"
+        saved_path = None
+        if ask_to_save:
+            macro_dir.mkdir(parents=True, exist_ok=True)
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Save Recorded Macro", str(default_path), "Python Script (*.py);;All Files (*.*)"
+            )
+            if path:
+                try:
+                    Path(path).write_text(script, encoding="utf-8")
+                    saved_path = path
+                    self.status_label.setText(f"Macro saved to {path}")
+                except Exception as exc:
+                    QMessageBox.critical(self, "Save failed", f"Could not save the macro:\n\n{exc}")
+        if open_in_editor:
+            editor = self.text_editor()
+            if saved_path:
+                editor.open_local(saved_path)
+            else:
+                editor.open_text(default_path.name, script, language="python", suggested_path=str(default_path))
+        return script
+
+    def _update_recording_ui(self, s: TerminalSession) -> None:
+        recording = s.recorder is not None
+        self.stop_macro_action.setEnabled(recording)
+        if not recording:
+            if self.rec_badge.isVisible():
+                self.rec_badge.hide()
+            return
+        seconds = int(s.recorder.elapsed())
+        dot = "\u25cf" if self._rec_blink_on else "\u25cb"
+        self.rec_badge.setText(
+            f"{dot}  REC  {seconds // 60}:{seconds % 60:02d}  \u00b7  {s.recorder.command_count} cmd"
+        )
+        if not self.rec_badge.isVisible():
+            self.rec_badge.show()
+
+    def _blink_recording(self) -> None:
+        self._rec_blink_on = not self._rec_blink_on
+        s = self.active_session
+        if s is not None and s.recorder is not None:
+            self._update_recording_ui(s)
+
     def closeEvent(self, event):
+        for s in list(self.sessions):
+            if s.recorder is not None:
+                self.stop_macro_recording(s, ask_to_save=True, open_in_editor=False)
+        if self._text_editor is not None and self._text_editor.isVisible() and not self._text_editor.close():
+            event.ignore()  # the user cancelled closing an editor tab with unsaved changes
+            return
         for s in list(self.sessions):
             s.close()
         event.accept()

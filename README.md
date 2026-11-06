@@ -25,6 +25,14 @@ Network SREs and hardware developers are constantly forced to choose between **w
 
 ## 🆕 What's New
 
+* **One-click launch.** `run_windows.bat`, `run_mac.command` and `run.sh` find Python, create `.venv`, install the dependencies and start the app. See [Quickstart](#-quickstart-guide).
+* **Built-in text editor.** A Notepad++-style editor with tabs, line numbers, syntax colouring, find / replace and go to line. Double-click a file in the SFTP browser to edit it, or type `vim file` / `nano file` in an SSH terminal and it opens there instead.
+* **Record Actions | Macro.** Record the commands you type in a terminal, with the time between them, and get a ready-to-run Python script. A blinking **REC** badge shows while recording.
+* **Terminal syntax highlighting.** Prompts, IPs, MAC addresses, URLs, paths, errors, warnings and numbers are coloured. Colours sent by the remote host always win.
+* **Faster terminal handling.** A **+** button next to the tabs opens a new terminal (also **Ctrl+Shift+T**), and you can double-click a tab to rename it in place.
+* **Saved Profiles editor.** Add, edit, connect and delete SSH and Telnet profiles from **Utility → Saved Profiles**.
+* **Cleaner DAW Suite rows.** Run, move and remove buttons are drawn to match the dark theme.
+* **Launch splash, AI panel closed by default.** A splash screen shows while the app loads, and the AI window opens only when you ask for it (**AI → AI Assistant Window**).
 * **LLM → Terminal modes.** One checkbox decides whether the AI acts on its own (**AUTO-RUN**) or asks first (**ASK FIRST**). See [AI Test Engineer](#-ai-test-engineer).
 * **No terminal needs to be open first.** With AUTO-RUN on, the AI opens a tab if none exists. If no tab is connected, it asks you to connect one instead of dropping the command.
 * **Run in Terminal picker.** One dialog to review or edit commands, tick the target terminals, connect a tab or open a new one, and send.
@@ -48,14 +56,29 @@ Network SREs and hardware developers are constantly forced to choose between **w
 * **Anti-Bell Trap:** Silently drops rogue `\x07 (BEL)` packets before they can disturb screen geometry or capture buffers.
 * **Per-session Logging:** Start, pause and stop logging for each tab.
 
+### 📝 Built-in Text Editor
+Open it from **Utility → Text Editor**, by double-clicking a file in the SFTP browser, or by typing `vi`, `vim`, `nano` (also with `sudo`) in an **SSH** terminal.
+* Tabs, line numbers, current-line highlight, auto-indent, word wrap, zoom (**Ctrl + wheel**) and show whitespace.
+* Syntax colouring for Python, Bash, YAML, JSON, INI, XML, Tera Term macros, logs and more. The language is picked from the file name or shebang, and you can change it from the **Language** menu.
+* **Ctrl+F** find, **Ctrl+H** replace (match case, whole word, regex), **Ctrl+G** go to line, **Ctrl+D** duplicate line, **Ctrl+/** toggle comment.
+* Line endings (LF / CR LF) and encoding are kept when saving. Remote files are saved straight back over SFTP.
+* How the terminal hand-off works: the typed command is cleared from the remote prompt, the shell's working directory is read so relative paths work, and the file opens in the editor. A file that does not exist yet opens empty and is created when you save. If the file cannot be opened (for example no read permission), you are asked whether to run the command in the terminal instead. Turn this off with **Utility → Open vi / vim / nano in Built-in Editor**. Telnet and serial terminals are never intercepted.
+
+### ⏺️ Macro Recorder
+1. **Utility → Record Actions | Macro...**, pick the terminal and click **Record Macro**.
+2. Work as usual. The tab shows a `●`, and the header shows a blinking **REC** badge with the time and number of commands.
+3. **Utility → Stop Macro Recording** (or the same dialog). Save the generated `.py` file. It opens in the editor so you can review it.
+
+The script replays each command with `send()` and waits with `pause()` as long as you did. Set `TIMING_SCALE` at the top to replay faster. Anything typed at a password prompt is **not** stored, and the script asks for it with `input()` when it runs. Commands recalled with the arrow keys or tab completion are read back from the screen. Run the macro with **Scripting → Run Script** or add it to the Multi-Script Suite.
+
 ### 🎛️ DAW Multi-Script Sequencer
 * **Session Tab Routing:** Assign Row 1 (`login.ttl`) to *Terminal A* and Row 2 (`scrape_routing_table.py`) to *Terminal B*. The GUI follows the active execution.
 * **Smart Prompt Sniffer:** A background regex engine hunts for prompt signifiers (`$`, `#`, `>`) to advance queue steps hands-free.
 * **The Operator Gate:** If a script times out or throws an exception, execution freezes and raises an OS audio alert, offering `[+15s Extend]`, `[Force Pass]` or `[Abort]`.
-* **Single-Bench Debugger:** Test one row in isolation with the `► Single` button.
+* **Single-Bench Debugger:** Test one row in isolation with its **Run** button.
 
 ---
-![MMTE main window](assests/main_window.png)
+![MMTE main window](assets/main_window.png)
 
 ## 🤖 AI Test Engineer
 
@@ -120,6 +143,9 @@ modern_multi_terminal/
 │   ├── script_engine.py         # Tera Term (.ttl) interpreter & Python exec() global hooks
 │   ├── sftp_hops.py             # SSH hop / jump-host chains for SFTP
 │   ├── profile_store.py         # Saved connection profiles
+│   ├── app_settings.py          # Persisted UI preferences (highlighting, editor options)
+│   ├── terminal_highlight.py    # Regex syntax highlighting for terminal output
+│   ├── macro_recorder.py        # Macro recording -> Python script; command-line parsing
 │   ├── presets.py               # Embedded sample macro repository
 │   ├── theme.py                 # Terminal colours and palette
 │   ├── qt_theme.py              # Application-wide dark palette and fonts
@@ -147,6 +173,9 @@ modern_multi_terminal/
 │   ├── ai_assistant_panel.py    # AI Test Engineer panel and LLM → Terminal logic
 │   ├── run_terminal_dialog.py   # Terminal picker / approval dialog
 │   ├── close_button.py          # Drawn close ("x") button for tabs and sidebar
+│   ├── icons.py                 # Vector icons drawn for the dark theme
+│   ├── text_editor.py           # Built-in Notepad++-style editor (local + SFTP files)
+│   ├── macro_dialog.py          # Record Actions | Macro dialog
 │   ├── ui_style.py              # Dark design tokens and application stylesheet
 │   ├── terminal_widget.py       # Terminal rendering and input
 │   ├── dialogs.py               # Connection builders, Rename, Help
@@ -155,12 +184,15 @@ modern_multi_terminal/
 │   ├── profiles_dialog.py       # Saved profile manager
 │   ├── llm_settings_dialog.py   # LLM provider settings
 │   ├── rag_dialog.py            # RAG memory manager
-│   ├── session_label.py         # Sidebar session rows
+│   ├── session_label.py         # Sidebar session rows, inline tab rename
 │   └── helpers.py
 │
 ├── tests/                       # Headless pytest suite (see tests/README.md)
 ├── pytest.ini
-├── main.py                      # Application entry point
+├── main.py                      # Application entry point and splash screen
+├── run.sh                       # One-step setup + launch (macOS / Linux)
+├── run_mac.command              # Double-click launcher for macOS Finder
+├── run_windows.bat              # One-step setup + launch (Windows)
 ├── LICENSE.txt                  # BSD 3-Clause License
 ├── requirements.txt             # Runtime dependencies
 ├── requirements-test.txt        # Test dependencies
@@ -171,20 +203,36 @@ modern_multi_terminal/
 
 ## 🚀 Quickstart Guide
 
-### 1. Requirements
+### 1. One-click launch (recommended)
+
+| System | What to run |
+|---|---|
+| Windows | Double-click **`run_windows.bat`** |
+| macOS | Double-click **`run_mac.command`** (or run `./run.sh` in Terminal) |
+| Linux | `./run.sh` |
+
+On the first run the script finds Python 3.10+, creates a private `.venv` folder next to the app, installs `requirements.txt` and starts the app. Later runs start straight away. Dependencies are reinstalled only when `requirements.txt` changes. Nothing outside the app folder is changed.
+
+* Windows: if Python is missing, the script offers to install Python 3.12 with `winget`.
+* macOS / Linux: if Python is missing, the script prints the install command for your system. On Linux it also warns when Qt's `libxcb-cursor0` library is missing.
+* Options: `--gguf` also installs local GGUF support, `--reinstall` rebuilds `.venv` from scratch, `--setup-only` prepares everything without starting the app.
+
+> macOS may block the first double-click on a downloaded file. Right-click `run_mac.command`, choose **Open**, then confirm.
+
+### 2. Manual installation
 
 **Python 3.10 or higher** on Windows, macOS or Linux.
-
-### 2. Installation
 
 ```bash
 git clone https://github.com/abyshergill/MMTE.git
 cd MMTE
 
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Runtime dependencies include `PyQt6`, `paramiko`, `pyserial`, `pyte` and `requests`.
+Runtime dependencies include `PyQt6`, `paramiko`, `pyserial`, `pyte`, `Pygments` and `requests`.
 
 ### 3. Launch
 
@@ -279,6 +327,8 @@ Settings and logs live under the user's home directory:
 * **Configuration folder:** `~/.modern_multi_terminal_emulator/`
 * **SSH and Telnet profiles:** `ssh_profiles.json`, `telnet_profiles.json`
 * **Session logs:** `logs/*.log`
+* **Recorded macros:** `macros/*.py` (default save location)
+* **UI preferences:** `app_settings.json` (syntax highlighting, editor interception, editor wrap and font size)
 * **LLM settings:** `llm_config.json` in the same folder, including the saved LLM → Terminal mode
 
 ---

@@ -98,3 +98,11 @@ class FakeApp:
 @pytest.fixture
 def fake_app():
     return FakeApp()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_app_settings(monkeypatch, tmp_path):
+    """Never read or write the user's real ~/.modern_multi_terminal_emulator/app_settings.json."""
+    import core.app_settings as app_settings
+
+    monkeypatch.setattr(app_settings, "SETTINGS_FILE", tmp_path / "app_settings.json")

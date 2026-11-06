@@ -242,6 +242,46 @@ QPlainTextEdit#CommandEditor {
     font-family: @mono@; font-size: 12px; background-color: @bg0@;
 }
 QListWidget#TerminalPicker::item { padding: 8px 8px; }
+
+/* --- Square icon buttons (DAW rows, tab "+") --- */
+QPushButton#IconBtn, QToolButton#IconBtn {
+    background-color: @bg2@; border: 1px solid @line2@; border-radius: 7px; padding: 0; min-height: 0;
+}
+QPushButton#IconBtn:hover, QToolButton#IconBtn:hover { background-color: @bg3@; border-color: @accent@; }
+QPushButton#IconBtn:disabled { background-color: @bg1@; border-color: @line@; }
+QPushButton#RunBtn {
+    background-color: #173a2c; border: 1px solid #2d6b52; color: #bdf0d6;
+    border-radius: 7px; padding: 0 12px 0 8px; min-height: 0; font-weight: 600;
+}
+QPushButton#RunBtn:hover { background-color: #1d4a38; border-color: @ok@; color: #ffffff; }
+QPushButton#RunBtn:disabled { background-color: @bg1@; border-color: @line@; color: @mute@; }
+QPushButton#RemoveBtn {
+    background-color: transparent; border: 1px solid transparent; border-radius: 7px; padding: 0; min-height: 0;
+}
+QPushButton#RemoveBtn:hover { background-color: @err_bg@; border-color: @err@; }
+QToolButton#NewTabBtn {
+    background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 0; margin: 0 0 2px 4px;
+}
+QToolButton#NewTabBtn:hover { background-color: @bg3@; border-color: @line2@; }
+QFrame#DawRow { background-color: @bg2@; border: 1px solid @line@; border-radius: 8px; }
+QFrame#DawRow QLabel { background: transparent; border: none; }
+QLabel#RecBadge {
+    background-color: #3a1218; color: #ff8a93; border: 1px solid #7a2a35;
+    border-radius: 9px; padding: 2px 10px; font-size: 11px; font-weight: 700; letter-spacing: 1px;
+}
+
+/* --- Built-in text editor --- */
+QPlainTextEdit#CodeEditor, QPlainTextEdit#CodeEditor:focus {
+    background-color: #0f131a; color: #d7dde5; border: none; border-radius: 0; padding: 0;
+    selection-background-color: #264f78; selection-color: #ffffff;
+}
+QFrame#FindBar { background-color: @bg1@; border-top: 1px solid @line@; }
+QStatusBar { background-color: @bg1@; color: @dim@; border-top: 1px solid @line@; }
+QStatusBar QLabel { color: @dim@; padding: 0 10px; background: transparent; }
+QToolBar { background-color: @bg1@; border: none; border-bottom: 1px solid @line@; spacing: 2px; padding: 3px 6px; }
+QToolBar QToolButton { background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 4px 8px; color: @text@; }
+QToolBar QToolButton:hover { background-color: @bg3@; border-color: @line2@; }
+QTabWidget#EditorTabs::pane { border: none; }
 """
 
 

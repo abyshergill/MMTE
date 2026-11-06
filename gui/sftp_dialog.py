@@ -111,7 +111,7 @@ class SFTPBrowserDialog(QDialog):
         self.session = session
         self.setAcceptDrops(True)
         self.setWindowTitle(f"Remote Files \u2014 {session.name}")
-        self.resize(760, 520)
+        self.resize(940, 560)
         self.setModal(False)
 
         self.current_path = "."
@@ -175,6 +175,10 @@ class SFTPBrowserDialog(QDialog):
         download_folder_btn.setObjectName("AccentBtn")
         download_folder_btn.clicked.connect(self._download_folder)
         actions.addWidget(download_folder_btn)
+        edit_btn = QPushButton("Open in Editor")
+        edit_btn.setToolTip("Edit the selected file in the built-in editor (or double-click it)")
+        edit_btn.clicked.connect(self._open_in_editor)
+        actions.addWidget(edit_btn)
         delete_btn = QPushButton("Delete Selected")
         delete_btn.setObjectName("DangerBtn")
         delete_btn.clicked.connect(self._delete_selected)
@@ -362,9 +366,34 @@ class SFTPBrowserDialog(QDialog):
 
     def _on_item_double_clicked(self, item: QListWidgetItem):
         data = item.data(Qt.ItemDataRole.UserRole)
-        if data and data["is_dir"]:
+        if not data:
+            return
+        if data["is_dir"]:
             self.current_path = posixpath.join(self.current_path.rstrip("/") or "/", data["name"])
             self._refresh()
+        else:
+            self.selected_entry = data
+            self._open_in_editor()
+
+    def _open_in_editor(self):
+        """Edit the selected remote file in the app's built-in editor (saved back over SFTP)."""
+        if not self.selected_entry or self.selected_entry["is_dir"]:
+            QMessageBox.warning(self, "No file selected", "Select a remote file (not a folder) to edit.")
+            return
+        remote_path = posixpath.join(self.current_path.rstrip("/") or "/", self.selected_entry["name"])
+        hops = self.session.sftp_hops
+        if not hops:
+            QMessageBox.warning(self, "Not connected", "The SFTP session is not ready yet.")
+            return
+        hop = hops[self.session.active_hop_index]
+        label = hop.get("label", "SFTP").split(": ", 1)[-1]
+
+        def on_saved(_doc, name=self.selected_entry["name"]):
+            self._set_status(f"Saved {name}")
+            self._refresh()
+
+        self.app.text_editor().open_remote(lambda h=hop: h["sftp"], remote_path, label=label, on_saved=on_saved)
+        self._set_status(f"Opening {remote_path} in the editor ...")
 
     def _create_folder(self):
         name, ok = QInputDialog.getText(self, "New Folder", "Folder name:")

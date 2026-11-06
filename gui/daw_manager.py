@@ -6,20 +6,20 @@ import time
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
-from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
+from PyQt6.QtGui import QFont, QIcon
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QWidget, QLabel, QPushButton, QCheckBox,
     QLineEdit, QComboBox, QFrame, QScrollArea, QVBoxLayout, QHBoxLayout,
-    QGridLayout, QFileDialog, QMessageBox, QSizePolicy, QStyle
+    QGridLayout, QFileDialog, QMessageBox, QSizePolicy
 )
 
 from core.models import PlaylistItem, ScriptStopped
 from core.script_engine import TeraTermMacroRunner, execute_python_script_sync
+from gui import icons
 from gui.dialogs import OperatorGateDialog
 
 TERMINAL_ACCENT = "#46f0a6"
 TERMINAL_MUTED = "#7b8b99"
-TERMINAL_ICON = "#d8f3dc"
 
 
 def trigger_os_beep():
@@ -31,20 +31,6 @@ def trigger_os_beep():
             QApplication.beep()
         except Exception:
             print("\a", end="", file=sys.stderr)
-
-def light_standard_icon(widget: QWidget, standard_pixmap: QStyle.StandardPixmap) -> QIcon:
-    """Convert a platform icon to a light icon for the dark theme."""
-    source_icon = widget.style().standardIcon(standard_pixmap)
-    source_pixmap = source_icon.pixmap(QSize(18, 18))
-    colored_pixmap = QPixmap(source_pixmap.size())
-    colored_pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(colored_pixmap)
-    painter.drawPixmap(0, 0, source_pixmap)
-    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-    painter.fillRect(colored_pixmap.rect(), QColor(TERMINAL_ICON))
-    painter.end()
-    return QIcon(colored_pixmap)
-
 
 class PlaylistSupervisorThread(QThread):
     """
@@ -207,7 +193,11 @@ class MultiScriptDialog(QDialog):
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll_area.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        self.scroll_area.viewport().setAutoFillBackground(False)
         self.scroll_content = QWidget()
+        self.scroll_content.setObjectName("DawScrollContent")
+        self.scroll_content.setStyleSheet("QWidget#DawScrollContent { background: transparent; }")
         self.scroll_layout = QVBoxLayout(self.scroll_content)
         self.scroll_layout.setContentsMargins(4, 4, 4, 4)
         self.scroll_layout.addStretch(1)
@@ -218,25 +208,28 @@ class MultiScriptDialog(QDialog):
         toolbar = QWidget()
         toolbar_layout = QHBoxLayout(toolbar)
         toolbar_layout.setContentsMargins(0, 16, 0, 0)
-        add_btn = QPushButton("+ Add Script Files")
-        add_btn.setStyleSheet("QPushButton { background-color: #2f6f95; color: white; }")
+        add_btn = QPushButton("Add Script Files")
+        add_btn.setIcon(icons.plus_icon(size=14))
         add_btn.clicked.connect(self._add_files)
         toolbar_layout.addWidget(add_btn)
         toolbar_layout.addStretch(1)
-        self.pause_btn = QPushButton("⏸ Pause")
-        self.pause_btn.setFixedWidth(90)
+        self.pause_btn = QPushButton("Pause")
+        self.pause_btn.setIcon(icons.pause_icon(size=14))
+        self.pause_btn.setMinimumWidth(100)
         self.pause_btn.setEnabled(False)
         self.pause_btn.clicked.connect(self._toggle_pause)
         toolbar_layout.addWidget(self.pause_btn)
-        self.stop_btn = QPushButton("⏹ Stop Suite")
-        self.stop_btn.setFixedWidth(100)
-        self.stop_btn.setStyleSheet("QPushButton { background-color: #8a2d3b; color: white; }")
+        self.stop_btn = QPushButton("Stop Suite")
+        self.stop_btn.setObjectName("DangerBtn")
+        self.stop_btn.setIcon(icons.stop_icon(size=14))
+        self.stop_btn.setMinimumWidth(120)
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self._stop_suite)
         toolbar_layout.addWidget(self.stop_btn)
         self.launch_btn = QPushButton("Launch Full Suite")
-        self.launch_btn.setFixedWidth(150)
-        self.launch_btn.setStyleSheet("QPushButton { background-color: #256d55; color: white; }")
+        self.launch_btn.setObjectName("AccentBtn")
+        self.launch_btn.setIcon(icons.play_icon(color="#0a0d1f", size=14))
+        self.launch_btn.setMinimumWidth(170)
         self.launch_btn.clicked.connect(self._launch_all)
         toolbar_layout.addWidget(self.launch_btn)
         root.addWidget(toolbar)
@@ -273,9 +266,11 @@ class MultiScriptDialog(QDialog):
         self.stop_btn.setEnabled(active)
         if active:
             paused = not running_sess.script_pause_event.is_set()
-            self.pause_btn.setText("▶ Resume" if paused else "⏸ Pause")
+            self.pause_btn.setText("Resume" if paused else "Pause")
+            self.pause_btn.setIcon(icons.play_icon(size=14) if paused else icons.pause_icon(size=14))
         else:
-            self.pause_btn.setText("⏸ Pause")
+            self.pause_btn.setText("Pause")
+            self.pause_btn.setIcon(icons.pause_icon(size=14))
 
     def _current_running_session(self):
         for item in self.playlist:
@@ -288,7 +283,8 @@ class MultiScriptDialog(QDialog):
         if not sess or not sess.script_running:
             return
         paused = sess.toggle_pause_script()
-        self.pause_btn.setText("▶ Resume" if paused else "⏸ Pause")
+        self.pause_btn.setText("Resume" if paused else "Pause")
+        self.pause_btn.setIcon(icons.play_icon(size=14) if paused else icons.pause_icon(size=14))
 
     def _stop_suite(self):
         if self.supervisor:
@@ -311,7 +307,7 @@ class MultiScriptDialog(QDialog):
         self.live_status_labels.clear()
 
         if not self.playlist:
-            empty_lbl = QLabel("[ Suite is empty. Click '+ Add Script Files' below. ]")
+            empty_lbl = QLabel("[ Suite is empty. Click 'Add Script Files' below. ]")
             empty_lbl.setStyleSheet(f"color: {TERMINAL_MUTED};")
             empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.scroll_layout.addWidget(empty_lbl)
@@ -325,9 +321,10 @@ class MultiScriptDialog(QDialog):
 
         for idx, item in enumerate(self.playlist):
             row = QFrame()
-            row.setStyleSheet("background-color: palette(base); border-radius: 4px;")
+            row.setObjectName("DawRow")
             row_layout = QGridLayout(row)
-            row_layout.setContentsMargins(6, 10, 6, 10)
+            row_layout.setContentsMargins(10, 8, 8, 8)
+            row_layout.setHorizontalSpacing(8)
             self.row_widgets.append(row)
 
             idx_lbl = QLabel(f"{idx + 1}.")
@@ -338,6 +335,7 @@ class MultiScriptDialog(QDialog):
 
             name_lbl = QLabel(Path(item.path).name)
             name_lbl.setFont(QFont("Consolas"))
+            name_lbl.setToolTip(item.path)
             row_layout.addWidget(name_lbl, 0, 1)
             row_layout.setColumnStretch(1, 1)
 
@@ -345,7 +343,7 @@ class MultiScriptDialog(QDialog):
             session_combo.addItems(session_names)
             current_name = item.target_session.name if item.target_session in self.app.sessions else (session_names[0] if session_names else "")
             session_combo.setCurrentText(current_name)
-            session_combo.setFixedWidth(115)
+            session_combo.setFixedWidth(130)
             session_combo.currentTextChanged.connect(lambda val, i=item: self._route_session(i, val))
             row_layout.addWidget(session_combo, 0, 2)
 
@@ -353,7 +351,7 @@ class MultiScriptDialog(QDialog):
             row_layout.addWidget(wait_lbl, 0, 3)
 
             t_entry = QLineEdit(str(int(item.timeout)))
-            t_entry.setFixedWidth(45)
+            t_entry.setFixedWidth(50)
             t_entry.textChanged.connect(lambda _text, i=item, w=t_entry: self._update_t(i, w))
             row_layout.addWidget(t_entry, 0, 4)
 
@@ -361,59 +359,39 @@ class MultiScriptDialog(QDialog):
             row_layout.addWidget(s_lbl, 0, 5)
 
             status_lbl = QLabel(item.status)
-            status_lbl.setFixedWidth(110)
+            status_lbl.setFixedWidth(120)
             row_layout.addWidget(status_lbl, 0, 6)
             self.live_status_labels[item] = status_lbl
 
             ctrls = QWidget()
+            ctrls.setStyleSheet("background: transparent;")
             ctrls_layout = QHBoxLayout(ctrls)
             ctrls_layout.setContentsMargins(4, 0, 0, 0)
-            ctrls_layout.setSpacing(4)
+            ctrls_layout.setSpacing(6)
 
-           #up_btn = QPushButton("▲"); up_btn.setFixedWidth(24)
-            up_btn = QPushButton()
-            #up_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowUp))
-            up_btn.setIcon(light_standard_icon(self, QStyle.StandardPixmap.SP_ArrowUp))
-            up_btn.setIconSize(QSize(16, 16))
-            up_btn.setFixedSize(32, 30)
-            up_btn.setToolTip("Move script up")
-            up_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            up_btn = self._icon_button(icons.chevron_icon("up"), "Move script up", "IconBtn")
+            up_btn.setEnabled(idx > 0)
             up_btn.clicked.connect(lambda _checked, i=idx: self._swap(i, i - 1))
             ctrls_layout.addWidget(up_btn)
 
-            #down_btn = QPushButton("▼"); down_btn.setFixedWidth(24)
-            down_btn = QPushButton()
-            #down_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowDown))
-            down_btn.setIcon(light_standard_icon(self, QStyle.StandardPixmap.SP_ArrowDown))
-            down_btn.setIconSize(QSize(16, 16))
-            down_btn.setFixedSize(32, 30)
-            down_btn.setToolTip("Move script down")
-            down_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            down_btn = self._icon_button(icons.chevron_icon("down"), "Move script down", "IconBtn")
+            down_btn.setEnabled(idx < len(self.playlist) - 1)
             down_btn.clicked.connect(lambda _checked, i=idx: self._swap(i, i + 1))
             ctrls_layout.addWidget(down_btn)
 
-            # single_btn = QPushButton("► Single")
-            # single_btn.setFixedWidth(60)
-            single_btn = QPushButton("Single")
-           # single_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
-            single_btn.setIcon(light_standard_icon(self, QStyle.StandardPixmap.SP_MediaPlay))
-            single_btn.setIconSize(QSize(16, 16))
-            single_btn.setFixedSize(82, 30)
-            single_btn.setToolTip("Run this script only")
+            single_btn = QPushButton("Run")
+            single_btn.setObjectName("RunBtn")
+            single_btn.setIcon(icons.play_icon(size=14))
+            single_btn.setIconSize(QSize(14, 14))
+            single_btn.setFixedHeight(30)
+            single_btn.setMinimumWidth(70)
+            single_btn.setToolTip("Run only this script (single-bench debug)")
             single_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            single_btn.setStyleSheet("QPushButton { background-color: #2f6f95; color: white; }")
+            single_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             single_btn.clicked.connect(lambda _checked, i=item: self._run_single(i))
             ctrls_layout.addWidget(single_btn)
 
-            #rm_btn = QPushButton("×"); rm_btn.setFixedWidth(24)
-            rm_btn = QPushButton()
-            #rm_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogCloseButton))
-            rm_btn.setIcon(light_standard_icon(self, QStyle.StandardPixmap.SP_DialogCloseButton))
-            rm_btn.setIconSize(QSize(16, 16))
-            rm_btn.setFixedSize(32, 30)
-            rm_btn.setToolTip("Remove script")
-            rm_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            rm_btn.setStyleSheet("QPushButton { background-color: #8a2d3b; color: white; }")
+            rm_btn = self._icon_button(icons.cross_icon(size=14), "Remove script from suite", "RemoveBtn")
             rm_btn.clicked.connect(lambda _checked, i=item: self._rm(i))
             ctrls_layout.addWidget(rm_btn)
 
@@ -423,6 +401,17 @@ class MultiScriptDialog(QDialog):
 
         self.scroll_layout.addStretch(1)
         self._update_live_ui()
+
+    def _icon_button(self, icon: QIcon, tooltip: str, object_name: str) -> QPushButton:
+        btn = QPushButton()
+        btn.setObjectName(object_name)
+        btn.setIcon(icon)
+        btn.setIconSize(QSize(16, 16))
+        btn.setFixedSize(30, 30)
+        btn.setToolTip(tooltip)
+        btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        return btn
 
     def _route_session(self, item: PlaylistItem, name: str):
         for s in self.app.sessions:

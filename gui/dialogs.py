@@ -155,7 +155,7 @@ class RenameDialog(QDialog):
 
 
 class SSHDialog(QDialog):
-    def __init__(self, app: object):
+    def __init__(self, app: object, profile: str | None = None):
         super().__init__(app)
         self.app = app
         self.result: dict | None = None
@@ -199,6 +199,10 @@ class SSHDialog(QDialog):
         btn_row.addWidget(cancel_btn)
         btn_row.addWidget(connect_btn)
         grid.addLayout(btn_row, 8, 0, 1, 2)
+
+        if profile and profile in self.app.profile_store.profiles:
+            self.profile_combo.setCurrentText(profile)
+            self.password.setFocus()
 
     def _load_profile(self, name: str):
         if not name:
@@ -320,7 +324,7 @@ class SerialDialog(QDialog):
 
 
 class TelnetDialog(QDialog):
-    def __init__(self, app: object):
+    def __init__(self, app: object, profile: str | None = None):
         super().__init__(app)
         self.app = app
         self.result: dict | None = None
@@ -367,6 +371,9 @@ class TelnetDialog(QDialog):
         btn_row.addWidget(cancel_btn)
         btn_row.addWidget(connect_btn)
         grid.addLayout(btn_row, 6, 0, 1, 2)
+
+        if profile and profile in telnet_profiles:
+            self.profile_combo.setCurrentText(profile)
 
     def _load_profile(self, name: str):
         if not name:
