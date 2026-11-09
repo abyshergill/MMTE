@@ -25,6 +25,12 @@ Network SREs and hardware developers are constantly forced to choose between **w
 
 ## 🆕 What's New
 
+* **Python plugins.** Drop a `.py` file in `plugins/` (or `~/.modern_multi_terminal_emulator/plugins`) with a `register(api)` function. Plugins can add menu items under **Plugins**, add functions to Python scripts and react to terminal output. **Plugins → New Plugin from Template** creates a starter file. See `plugins/example_hello.py`.
+* **Readable logs.** Colour codes and cursor control sequences are stripped from log files, and typed text is no longer logged twice.
+* **Macros keep the prompt.** Recorded macros show the prompt each command was typed at, e.g. `# [root@a:~#]`, and no longer print banners into the terminal.
+* **Quiet scripts.** Script and macro progress messages go to the status bar instead of the console.
+* **Sidebar handle.** After hiding the sidebar, a small arrow appears next to the header to bring it back (or press Ctrl+B).
+* **More example scripts** in `Scripts/ttl` and `Scripts/python`.
 * **One-click launch.** `run_windows.bat`, `run_mac.command` and `run.sh` find Python, create `.venv`, install the dependencies and start the app. See [Quickstart](#-quickstart-guide).
 * **Built-in text editor.** A Notepad++-style editor with tabs, line numbers, syntax colouring, find / replace and go to line. Double-click a file in the SFTP browser to edit it, or type `vim file` / `nano file` in an SSH terminal and it opens there instead.
 * **Record Actions | Macro.** Record the commands you type in a terminal, with the time between them, and get a ready-to-run Python script. A blinking **REC** badge shows while recording.

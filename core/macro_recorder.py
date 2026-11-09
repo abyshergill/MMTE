@@ -40,6 +40,13 @@ def extract_command(screen_line: str) -> str:
     return line.strip()
 
 
+def extract_prompt(screen_line: str) -> str:
+    """Return the prompt part of a rendered terminal line (``root@a:~#``), or ''."""
+    line = (screen_line or "").rstrip()
+    match = _PROMPT_RE.match(line)
+    return match.group(0).strip() if match else ""
+
+
 def is_secret_prompt(screen_line: str) -> bool:
     """True when the line looks like a password / passphrase prompt (input is not echoed)."""
     return bool(_SECRET_RE.search((screen_line or "").rstrip()))
@@ -101,6 +108,7 @@ class MacroStep:
     kind: str              # "line" | "secret" | "keys" | "note"
     text: str
     comment: str = ""
+    prompt: str = ""       # the shell prompt shown before the command, e.g. "root@host:~#"
 
 
 @dataclass
@@ -123,11 +131,12 @@ class MacroRecorder:
         self._last = now
         return delay
 
-    def record_line(self, text: str, secret: bool = False, prompt: str = "") -> None:
+    def record_line(self, text: str, secret: bool = False, prompt: str = "", where: str = "") -> None:
+        """``where`` is the shell prompt (computer name and location) shown before the command."""
         if secret:
-            self.steps.append(MacroStep(self._delay(), "secret", "", comment=prompt.strip()))
+            self.steps.append(MacroStep(self._delay(), "secret", "", comment=prompt.strip(), prompt=where.strip()))
         else:
-            self.steps.append(MacroStep(self._delay(), "line", text))
+            self.steps.append(MacroStep(self._delay(), "line", text, prompt=where.strip()))
 
     def record_keys(self, keys: str) -> None:
         self.steps.append(MacroStep(self._delay(), "keys", keys, CONTROL_KEY_NAMES.get(keys, "")))
@@ -151,6 +160,7 @@ class MacroRecorder:
             f"# Recorded : {self.started_wall:%Y-%m-%d %H:%M:%S}  -  {self.command_count} command(s)  -  {total:.1f} s",
             "#",
             "# Replay: Scripting > Run Script... (or add it to the Multi-Script Suite).",
+            "# Each command is preceded by a comment with the prompt it was typed at, e.g. # [root@a:~#]",
             "#   send(text)     types the text and presses Enter",
             "#   pause(seconds) waits as long as you did while recording",
             "# Tip: swap a pause(...) for wait(\"$ \") to continue as soon as the prompt appears.",
@@ -171,11 +181,12 @@ class MacroRecorder:
                 f"# {self.connect_hint}",
                 "",
             ]
-        lines.append('print("Replaying recorded macro ...")')
         for step in self.steps:
             delay = round(step.delay, 1)
             if delay >= 0.1:
                 lines.append(f"pause({delay})")
+            if step.kind in ("line", "secret") and step.prompt:
+                lines.append(f"# [{step.prompt}]")
             if step.kind == "line":
                 lines.append(f"send({step.text!r})")
             elif step.kind == "secret":
@@ -186,5 +197,4 @@ class MacroRecorder:
                 lines.append(f"send({step.text!r}, newline=False){note}")
             elif step.kind == "note":
                 lines.append(f"# {step.text}")
-        lines.append('print("Macro finished.")')
         return "\n".join(lines) + "\n"

@@ -39,9 +39,7 @@ class TeraTermMacroRunner:
             cmd = cmd.lower()
             if arg in self.variables: arg = self.variables[arg]
             if cmd == "end":
-                self.session.incoming.put(f"\r\n[TTL line {line_no}: 'end' execution loop terminated successfully]\r\n")
                 break
-            self.session.incoming.put(f"\r\n[TTL line {line_no}: {cmd}]\r\n")
             if cmd == "connect": self._connect(arg)
             elif cmd == "wait": self._wait(arg)
             elif cmd == "sendln": self.session.send(self._unquote(arg) + "\n")
@@ -258,7 +256,6 @@ def execute_python_script_sync(session: "TerminalSession", path: str):
         done.wait()
 
         entered = user_input["value"]
-        cur_sess[0].incoming.put(f"\r\n[Input '{prompt}': '{entered}']\r\n")
         return entered
 
 
@@ -290,11 +287,9 @@ def execute_python_script_sync(session: "TerminalSession", path: str):
                 p = (script_dir / p).resolve()
             # Stop a specific log file
             cur_sess[0].disable_logging(p)
-            cur_sess[0].incoming.put(f"\r\n[Logging STOPPED: {p.name}]\r\n")
         else:
             # Stop ALL active logs if no specific path was provided
             cur_sess[0].disable_logging()
-            cur_sess[0].incoming.put(f"\r\n[ALL Logging STOPPED]\r\n")
 
     class _LogOffCallable:
         def __call__(self, log_path: str | None = None):
@@ -371,6 +366,9 @@ def execute_python_script_sync(session: "TerminalSession", path: str):
         "run_script": run_script,
         "terminal_name": DynamicTerminalName()
     }
+    plugins = getattr(session.app, "plugins", None)
+    for name, func in (getattr(plugins, "script_functions", None) or {}).items():
+        globs.setdefault(name, func)
     session.script_checkpoint()
     # One namespace for globals *and* locals: with separate dicts, functions defined in
     # the script cannot see the script's own top-level names or imports (NameError).

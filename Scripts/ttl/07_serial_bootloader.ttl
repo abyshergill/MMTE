@@ -1,0 +1,11 @@
+; Serial console: interrupt a boot loader and print the environment.
+; Replace COM3 and the baud rate with your own values.
+
+connect '/C=3 /BAUD=115200'
+wait 'Hit any key'
+send ' '
+pause 1
+sendln 'printenv'
+mpause 1500
+sendln 'boot'
+end
