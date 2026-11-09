@@ -3,6 +3,7 @@ import re
 import sys
 import threading
 import time
+from gui.helpers import mono_font
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
@@ -331,7 +332,7 @@ class MultiScriptDialog(QDialog):
             row_layout.addWidget(idx_lbl, 0, 0)
 
             name_lbl = QLabel(Path(item.path).name)
-            name_lbl.setFont(QFont("Consolas"))
+            name_lbl.setFont(mono_font())
             name_lbl.setToolTip(item.path)
             row_layout.addWidget(name_lbl, 0, 1)
             row_layout.setColumnStretch(1, 1)

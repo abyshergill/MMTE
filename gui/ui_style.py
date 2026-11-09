@@ -38,7 +38,7 @@ TOKENS = {
     "select": "#2a3566",
     "term_bg": TERMINAL_BG,
     "term_fg": TERMINAL_FG,
-    "mono": "'Cascadia Mono', 'JetBrains Mono', Consolas, 'SF Mono', Menlo, 'DejaVu Sans Mono', monospace",
+    "mono": "'JetBrains Mono', 'SF Mono', Menlo, 'Cascadia Mono', 'DejaVu Sans Mono', Consolas, monospace",
     "sans": "'Segoe UI Variable', 'Segoe UI', Inter, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif",
 }
 

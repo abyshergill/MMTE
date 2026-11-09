@@ -1,4 +1,5 @@
 from __future__ import annotations
+from gui.helpers import mono_font
 from PyQt6.QtCore import Qt, QEvent
 from PyQt6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor, QTextOption
 from PyQt6.QtWidgets import QPlainTextEdit, QTextEdit
@@ -50,10 +51,7 @@ class TerminalWidget(QPlainTextEdit):
 
         self.setCenterOnScroll(False)
 
-        font = QFont("Consolas", 13)
-        font.setStyleHint(QFont.StyleHint.Monospace)
-        font.setFixedPitch(True)
-        self.setFont(font)
+        self.setFont(mono_font(13))
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.DefaultContextMenu)
 
     
