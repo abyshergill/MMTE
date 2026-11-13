@@ -132,20 +132,23 @@ impl ScriptHost {
             }
             let (cmd, mut arg) = ttl_split_command(&line);
             let cmd = cmd.to_lowercase();
-            if let Some(v) = vars.get(&arg) {
+            // a variable's value is already final text: it must not be parsed as Tera Term syntax again
+            let literal: Option<String> = vars.get(&arg).cloned();
+            if let Some(v) = &literal {
                 arg = v.clone();
             }
+            let value = |arg: &str| literal.clone().unwrap_or_else(|| ttl_text(arg));
             match cmd.as_str() {
                 "end" => break,
                 "connect" => self.ttl_connect(&arg)?,
                 "wait" => {
-                    let pattern = ttl_text(&arg);
+                    let pattern = value(&arg);
                     if !pattern.is_empty() && !self.cur().wait_for(&pattern, 60.0, true)? {
                         return Err(ScriptError::Failed(format!("wait timed out for: {pattern}")));
                     }
                 }
-                "sendln" => self.cur().send(&(ttl_text(&arg) + "\n")),
-                "send" => self.cur().send(&ttl_text(&arg)),
+                "sendln" => self.cur().send(&(value(&arg) + "\n")),
+                "send" => self.cur().send(&value(&arg)),
                 // `inputbox 'message' 'title'` / `passwordbox ...`: the answer is stored in `inputstr`
                 "inputbox" | "passwordbox" => {
                     let message = shell_split(&arg).first().map(|m| ttl_text(m)).unwrap_or_default();
@@ -585,6 +588,38 @@ mod tests {
         assert_eq!(ttl_text("#3"), "\u{3}");
         assert_eq!(ttl_text("'a;b'#13#10"), "a;b\r\n");
         assert_eq!(ttl_text("plain"), "plain");
+    }
+
+    #[test]
+    fn ttl_variable_values_are_not_reparsed() {
+        let (hub, rx) = Hub::new();
+        let s = hub.new_session(None);
+        // the password dialog answers with text that looks like Tera Term syntax
+        std::thread::spawn(move || {
+            if let Ok(crate::session::UiRequest::Input { reply, .. }) = rx.recv_timeout(Duration::from_secs(5)) {
+                let _ = reply.send("#12'ab".to_string());
+            }
+        });
+        let host = ScriptHost::new(hub.clone(), s.clone(), vec![]);
+        let dir = std::env::temp_dir().join(format!("mmte_ttlvar_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("t.ttl");
+        std::fs::write(&p, "passwordbox 'Password:' 'Macro'\nsendln inputstr\nend\n").unwrap();
+        // no connection: the bytes land in the "[No active connection]" path, so listen on a real one
+        use std::io::Read;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (tx2, rx2) = crossbeam_channel::unbounded();
+        std::thread::spawn(move || {
+            let (mut sock, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 64];
+            let n = sock.read(&mut buf).unwrap_or(0);
+            let _ = tx2.send(buf[..n].to_vec());
+        });
+        s.connect(ConnSpec::Telnet { host: "127.0.0.1".into(), port }).unwrap();
+        host.run_ttl(&p).unwrap();
+        assert_eq!(rx2.recv_timeout(Duration::from_secs(5)).unwrap(), b"#12'ab\n");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
