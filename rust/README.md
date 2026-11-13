@@ -43,6 +43,15 @@ to choose the interpreter. Plugins are `.py` files in `plugins/` (next to the pr
 `~/.modern_multi_terminal_emulator/plugins`; see `../plugins/example_hello.py` and the **Plugins** menu
 (`api.add_menu_action`, `api.add_script_function`, `api.on_output`, `api.send`, `api.status`, ...).
 
+## Macro recording: Python or Tera Term
+
+**Utility → Macro format** chooses what a recording is saved as. With Python 3 installed the default is
+a Python script; without it the default is a Tera Term `.ttl` macro, which replays with no Python at all.
+Both keep the prompt of every command as a comment, and neither stores passwords (the Python macro uses
+`input(...)`, the `.ttl` macro uses `passwordbox`, so you are asked when it runs). The `.ttl` interpreter
+understands `#13`-style character codes and concatenated strings (`'it'#39's'`), `inputbox` and `passwordbox`
+(answer in `inputstr`).
+
 ## AI assistant
 
 Providers: OpenAI, Anthropic, Gemini, Groq, Mistral, DeepSeek, xAI, OpenRouter, Together, Ollama, LM Studio,

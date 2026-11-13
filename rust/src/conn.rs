@@ -32,6 +32,15 @@ impl ConnSpec {
             ConnSpec::Serial { port, baud, .. } => format!("Serial {port} @ {baud}"),
         }
     }
+    /// A commented Tera Term `connect` line for `.ttl` macros.
+    pub fn ttl_hint(&self) -> String {
+        match self {
+            ConnSpec::Ssh { host, username, port, .. } => format!("connect '{host} /ssh /user={username} /passwd=PASSWORD /port={port}'"),
+            ConnSpec::Telnet { host, port } => format!("connect '{host} /telnet /port={port}'"),
+            ConnSpec::Serial { port, baud, .. } => format!("(serial {port} @ {baud}: connect the terminal before replaying)"),
+        }
+    }
+
     /// A commented `connect_*` line for macro scripts.
     pub fn connect_hint(&self) -> String {
         match self {

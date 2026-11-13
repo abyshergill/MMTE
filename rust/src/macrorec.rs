@@ -211,6 +211,54 @@ impl MacroRecorder {
         self.started.elapsed().as_secs_f64()
     }
 
+    /// The recording as a Tera Term macro (`.ttl`): replays without Python.
+    pub fn to_ttl(&self, connect_hint: &str) -> String {
+        let total = self.elapsed();
+        let mut l: Vec<String> = vec![
+            "; Macro recorded with Modern Multi Terminal Emulator".into(),
+            format!("; Terminal : {} ({})", self.session_name, self.connection_label),
+            format!("; Recorded : {}  -  {} command(s)  -  {:.1} s", self.started_wall.format("%Y-%m-%d %H:%M:%S"), self.command_count(), total),
+            ";".into(),
+            "; Replay: Scripting > Run Script... (no Python needed).".into(),
+            "; Each command is preceded by a comment with the prompt it was typed at, e.g. ; [root@a:~#]".into(),
+            "; mpause waits as long as you did while recording (milliseconds). Delete a line for a faster replay,".into(),
+            "; or replace it with  wait '$ '  to continue as soon as the prompt appears.".into(),
+            "".into(),
+        ];
+        if !connect_hint.is_empty() {
+            l.push("; The terminal was already connected when recording started. To connect from the".into());
+            l.push("; macro instead, uncomment the next line:".into());
+            l.push(format!("; {connect_hint}"));
+            l.push("".into());
+        }
+        for step in &self.steps {
+            let ms = ((step.delay * 10.0).round() as i64) * 100;
+            if ms >= 100 {
+                l.push(format!("mpause {ms}"));
+            }
+            if matches!(step.kind, "line" | "secret") && !step.prompt.is_empty() {
+                l.push(format!("; [{}]", step.prompt));
+            }
+            match step.kind {
+                "line" => l.push(format!("sendln {}", ttl_quote(&step.text))),
+                "secret" => {
+                    let label = if step.comment.is_empty() { "Password" } else { &step.comment };
+                    l.push("; hidden input - the password is not stored in the macro".into());
+                    l.push(format!("passwordbox {} 'Macro'", ttl_quote(label)));
+                    l.push("sendln inputstr".into());
+                }
+                "keys" => {
+                    let note = if step.comment.is_empty() { String::new() } else { format!("  ; {}", step.comment) };
+                    l.push(format!("send {}{}", ttl_quote(&step.text), note));
+                }
+                "note" => l.push(format!("; {}", step.text)),
+                _ => {}
+            }
+        }
+        l.push("end".into());
+        l.join("\n") + "\n"
+    }
+
     pub fn to_python(&self) -> String {
         let total = self.elapsed();
         let mut l: Vec<String> = vec![
@@ -265,6 +313,31 @@ impl MacroRecorder {
     }
 }
 
+/// Tera Term string literal: `'text'` with `#n` for quotes and control characters.
+pub fn ttl_quote(s: &str) -> String {
+    let mut out = String::new();
+    let mut open = false;
+    for c in s.chars() {
+        if c == '\'' || (c as u32) < 0x20 || c as u32 == 0x7f {
+            if open {
+                out.push('\'');
+                open = false;
+            }
+            out.push_str(&format!("#{}", c as u32));
+        } else {
+            if !open {
+                out.push('\'');
+                open = true;
+            }
+            out.push(c);
+        }
+    }
+    if open {
+        out.push('\'');
+    }
+    if out.is_empty() { "''".into() } else { out }
+}
+
 /// Python-style repr of a string (single quotes unless the text has a single quote and no double).
 pub fn py_repr(s: &str) -> String {
     let quote = if s.contains('\'') && !s.contains('"') { '"' } else { '\'' };
@@ -310,6 +383,25 @@ mod tests {
         assert!(parse_editor_command("vim a | cat").is_none());
         assert!(parse_editor_command("ls").is_none());
         assert!(parse_editor_command("vim").is_none());
+    }
+
+    #[test]
+    fn ttl_macro_output() {
+        let mut r = MacroRecorder::new("t", "Telnet 10.0.0.1", "");
+        r.record_line("ls -l", false, "", "root@a:~#");
+        r.record_line("echo 'it'", false, "", "");
+        r.record_line("", true, "Password:", "");
+        r.record_keys("\x03");
+        r.record_note("opened in the built-in editor: vim x");
+        let t = r.to_ttl("connect '10.0.0.1 /telnet /port=23'");
+        assert!(t.contains("; [root@a:~#]\nsendln 'ls -l'"), "{t}");
+        assert!(t.contains("sendln 'echo 'it'") == false && t.contains("sendln 'echo '#39'it'#39"), "{t}");
+        assert!(t.contains("passwordbox 'Password:' 'Macro'\nsendln inputstr"), "{t}");
+        assert!(t.contains("send #3  ; Ctrl+C"), "{t}");
+        assert!(t.contains("; connect '10.0.0.1 /telnet /port=23'"));
+        assert!(t.trim_end().ends_with("end"));
+        assert_eq!(ttl_quote(""), "''");
+        assert_eq!(ttl_quote("a\tb"), "'a'#9'b'");
     }
 
     #[test]

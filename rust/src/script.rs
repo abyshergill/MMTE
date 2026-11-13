@@ -126,7 +126,7 @@ impl ScriptHost {
                 let (name, value) = line.split_once('=').unwrap();
                 let name = name.trim();
                 if is_identifier(name) {
-                    vars.insert(name.to_string(), ttl_unquote(value.trim()));
+                    vars.insert(name.to_string(), ttl_text(value.trim()));
                     continue;
                 }
             }
@@ -139,13 +139,19 @@ impl ScriptHost {
                 "end" => break,
                 "connect" => self.ttl_connect(&arg)?,
                 "wait" => {
-                    let pattern = ttl_unquote(&arg);
+                    let pattern = ttl_text(&arg);
                     if !pattern.is_empty() && !self.cur().wait_for(&pattern, 60.0, true)? {
                         return Err(ScriptError::Failed(format!("wait timed out for: {pattern}")));
                     }
                 }
-                "sendln" => self.cur().send(&(ttl_unquote(&arg) + "\n")),
-                "send" => self.cur().send(&ttl_unquote(&arg)),
+                "sendln" => self.cur().send(&(ttl_text(&arg) + "\n")),
+                "send" => self.cur().send(&ttl_text(&arg)),
+                // `inputbox 'message' 'title'` / `passwordbox ...`: the answer is stored in `inputstr`
+                "inputbox" | "passwordbox" => {
+                    let message = shell_split(&arg).first().map(|m| ttl_text(m)).unwrap_or_default();
+                    let value = self.hub.input(&message);
+                    vars.insert("inputstr".into(), value);
+                }
                 "pause" | "mpause" => {
                     let mut d: f64 = ttl_unquote(&arg).parse().unwrap_or(1.0);
                     if cmd == "mpause" {
@@ -508,6 +514,43 @@ pub fn ttl_split_command(line: &str) -> (String, String) {
     }
 }
 
+/// Tera Term string syntax: `'text'`, `"text"`, `#13` character codes, and concatenation of those
+/// (`'it'#39's'`). Anything else is returned as is.
+pub fn ttl_text(arg: &str) -> String {
+    let t = arg.trim();
+    if !matches!(t.chars().next(), Some('\'' | '"' | '#')) {
+        return t.to_string();
+    }
+    let chars: Vec<char> = t.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        match chars[i] {
+            q @ ('\'' | '"') => {
+                i += 1;
+                while i < chars.len() && chars[i] != q {
+                    out.push(chars[i]);
+                    i += 1;
+                }
+                i += 1;
+            }
+            '#' => {
+                i += 1;
+                let mut n = String::new();
+                while i < chars.len() && chars[i].is_ascii_digit() {
+                    n.push(chars[i]);
+                    i += 1;
+                }
+                if let Some(c) = n.parse::<u32>().ok().and_then(char::from_u32) {
+                    out.push(c);
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    out
+}
+
 pub fn ttl_unquote(text: &str) -> String {
     let t = text.trim();
     let b: Vec<char> = t.chars().collect();
@@ -538,6 +581,10 @@ mod tests {
         assert_eq!(ttl_split_command("sendln  'x y'"), ("sendln".into(), "'x y'".into()));
         assert_eq!(ttl_unquote("'abc'"), "abc");
         assert_eq!(ttl_unquote("abc"), "abc");
+        assert_eq!(ttl_text("'it'#39's'"), "it's");
+        assert_eq!(ttl_text("#3"), "\u{3}");
+        assert_eq!(ttl_text("'a;b'#13#10"), "a;b\r\n");
+        assert_eq!(ttl_text("plain"), "plain");
     }
 
     #[test]

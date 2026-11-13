@@ -206,16 +206,31 @@ impl App {
         self.status(&format!("Recording macro on {}", s.name()));
     }
 
+    /// "python" or "ttl": the saved choice, otherwise Python when it is installed and Tera Term if not.
+    pub fn macro_format(&self) -> &'static str {
+        match self.settings.get_str("macro_format").as_deref() {
+            Some("python") => "python",
+            Some("ttl") => "ttl",
+            _ => if crate::script::find_python().is_some() { "python" } else { "ttl" },
+        }
+    }
+
     pub fn stop_macro(&mut self, s: &Arc<Session>, ask_to_save: bool) {
         let Some(rec) = s.recorder.lock().take() else { return };
-        let script = rec.to_python();
+        let ttl = self.macro_format() == "ttl";
+        let (script, ext, language) = if ttl {
+            let hint = if rec.connect_hint.is_empty() { String::new() } else { s.spec.lock().as_ref().map(|sp| sp.ttl_hint()).unwrap_or_default() };
+            (rec.to_ttl(&hint), "ttl", "teraterm")
+        } else {
+            (rec.to_python(), "py", "python")
+        };
         let dir = config::macro_dir();
         let _ = std::fs::create_dir_all(&dir);
-        let file = format!("macro_{}_{}.py", sanitize(&s.name()), rec.started_wall.format("%Y%m%d_%H%M%S"));
+        let file = format!("macro_{}_{}.{ext}", sanitize(&s.name()), rec.started_wall.format("%Y%m%d_%H%M%S"));
         let default_path = dir.join(&file);
         let mut saved: Option<PathBuf> = None;
         if ask_to_save {
-            if let Some(p) = rfd::FileDialog::new().set_directory(&dir).set_file_name(&file).add_filter("Python Script", &["py"]).add_filter("All Files", &["*"]).save_file() {
+            if let Some(p) = rfd::FileDialog::new().set_directory(&dir).set_file_name(&file).add_filter(if ttl { "Tera Term Macro" } else { "Python Script" }, &[ext]).add_filter("All Files", &["*"]).save_file() {
                 match std::fs::write(&p, &script) {
                     Ok(()) => {
                         self.status(&format!("Macro saved to {}", p.display()));
@@ -230,7 +245,7 @@ impl App {
         }
         match saved {
             Some(p) => self.extras.editor.open_local(&p),
-            None => self.extras.editor.open_text(&file, script, "python", Some(default_path)),
+            None => self.extras.editor.open_text(&file, script, language, Some(default_path)),
         }
         self.extras.editor.visible = true;
     }
@@ -691,6 +706,17 @@ impl App {
                     }
                     ui.close();
                 }
+                ui.menu_button("Macro format", |ui| {
+                    let current = self.macro_format();
+                    for (label, key) in [("Python script (.py)", "python"), ("Tera Term macro (.ttl)", "ttl")] {
+                        if ui.selectable_label(current == key, label).clicked() {
+                            self.settings.set("macro_format", json!(key));
+                            ui.close();
+                        }
+                    }
+                    ui.separator();
+                    ui.label(egui::RichText::new(if crate::script::find_python().is_some() { "Python 3 found: both formats replay." } else { "Python 3 not found: use Tera Term." }).size(12.0).color(theme::MUTE));
+                });
                 ui.separator();
                 if ui.button("Clear Terminal").clicked() {
                     if let Some(s) = &cur {
@@ -1212,6 +1238,67 @@ mod tests {
         assert!(got.lock().contains(&3u8));
         let script = s.recorder.lock().as_ref().unwrap().to_python();
         assert!(script.contains("send('\\x03', newline=False)  # Ctrl+C"), "{script}");
+    }
+
+    #[test]
+    fn ttl_macro_replays_without_python() {
+        let (mut app, ctx) = test_app();
+        app.settings.set("macro_format", json!("ttl"));
+        assert_eq!(app.macro_format(), "ttl");
+        let (port, _got) = device();
+        let s = connect(&mut app, port);
+        app.start_macro(&s);
+        feed(&mut app, &ctx, vec![Event::Text("echo it's ok".into()), key(Key::Enter, Default::default())]);
+        s.wait_for("root@dev:~#", 5.0, true).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let ttl = s.recorder.lock().as_ref().unwrap().to_ttl("");
+        assert!(ttl.contains("sendln 'echo it'#39's ok'"), "{ttl}");
+        s.disconnect();
+        // replay on a second device and check the exact bytes it receives
+        let (port2, got2) = device();
+        let s2 = app.hub.new_session(Some("replay"));
+        s2.connect(ConnSpec::Telnet { host: "127.0.0.1".into(), port: port2 }).unwrap();
+        let dir = std::env::temp_dir().join(format!("mmte_ttl_replay_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("m.ttl");
+        std::fs::write(&file, ttl).unwrap();
+        let host = crate::script::ScriptHost::new(app.hub.clone(), s2.clone(), vec![]);
+        host.run_file(&file).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert_eq!(got2.lock().as_slice(), b"echo it's ok\n");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ttl_macro_asks_for_the_password_when_replayed() {
+        let (mut app, ctx) = test_app();
+        app.settings.set("macro_format", json!("ttl"));
+        let (port, _got) = device();
+        let s = connect(&mut app, port);
+        s.local("\r\nPassword: ");
+        app.start_macro(&s);
+        feed(&mut app, &ctx, vec![Event::Text("hunter2".into()), key(Key::Enter, Default::default())]);
+        let ttl = s.recorder.lock().as_ref().unwrap().to_ttl("");
+        assert!(!ttl.contains("hunter2"), "{ttl}");
+        s.disconnect();
+        let (port2, got2) = device();
+        let s2 = app.hub.new_session(Some("replay"));
+        s2.connect(ConnSpec::Telnet { host: "127.0.0.1".into(), port: port2 }).unwrap();
+        // answer the password dialog the way the UI would
+        let rx = app.ui_rx.clone();
+        std::thread::spawn(move || {
+            if let Ok(crate::session::UiRequest::Input { reply, .. }) = rx.recv_timeout(std::time::Duration::from_secs(5)) {
+                let _ = reply.send("s3cret".to_string());
+            }
+        });
+        let dir = std::env::temp_dir().join(format!("mmte_ttl_pw_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("m.ttl");
+        std::fs::write(&file, ttl).unwrap();
+        crate::script::ScriptHost::new(app.hub.clone(), s2.clone(), vec![]).run_file(&file).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert_eq!(got2.lock().as_slice(), b"s3cret\n");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
