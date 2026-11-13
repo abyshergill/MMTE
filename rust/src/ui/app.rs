@@ -30,6 +30,7 @@ pub struct App {
     pub extras: super::windows::Extras,
     hook_daemon: Option<plugins::HookDaemon>,
     pub shot: Option<(PathBuf, u32)>,
+    icon: Option<egui::TextureHandle>,
 }
 
 impl App {
@@ -46,10 +47,12 @@ impl App {
         crate::session::set_repaint_context(ctx.clone());
         let (hub, ui_rx) = Hub::new();
         hub.highlight.store(settings.get_bool("syntax_highlighting", true), std::sync::atomic::Ordering::SeqCst);
+        hub.intercept_editors.store(settings.get_bool("intercept_editors", true), std::sync::atomic::Ordering::SeqCst);
         let first = hub.new_session(None);
         if std::env::var("MMTE_DEMO").is_ok() {
             first.local("root@lab:~# ls -l /etc | head -3\r\n\x1b[1;34mdrwxr-xr-x\x1b[0m 3 root root 4096 Nov 12 10:01 \x1b[32mapt\x1b[0m\r\nping 10.0.0.1: 64 bytes, time=0.8 ms, status ok\r\nError: connection refused to https://example.com/x\r\nroot@lab:~# ");
         }
+        let icon = super::icon::texture(ctx, 128);
         let mut app = Self {
             hub: hub.clone(),
             ui_rx,
@@ -58,12 +61,13 @@ impl App {
             telnet_profiles,
             plugin_dirs,
             plugins: Vec::new(),
-            dialogs: Dialogs::new(),
+            dialogs: { let mut d = Dialogs::new(); d.icon = icon.clone(); d },
             tuis: HashMap::new(),
             sidebar: true,
             inline_rename: None,
             extras: super::windows::Extras::new(hub),
             hook_daemon: None,
+            icon,
             shot: std::env::var("MMTE_SCREENSHOT").ok().map(|p| (PathBuf::from(p), 0)),
         };
         app.reload_plugins();
@@ -310,7 +314,7 @@ impl App {
                 if let Some(r) = s.recorder.lock().as_mut() {
                     r.record_note(&format!("opened in the built-in editor: {command}"));
                 }
-                self.extras.open_files_from_terminal(s, &command, sudo, files);
+                self.extras.open_files_from_terminal(s, &command, sudo, files, true);
                 return true;
             }
         }
@@ -603,6 +607,15 @@ impl App {
                 UiRequest::Gate { script, reason, tail, reply } => self.dialogs.gates.push_back(PendingGate { script, reason, tail, reply }),
                 UiRequest::Confirm { title, message, reply } => self.dialogs.confirms.push_back(PendingConfirm { title, message, reply }),
                 UiRequest::Info { title, message } => self.dialogs.message(&title, &message),
+                UiRequest::OpenRemote { session_id, command, sudo, files, wipe } => {
+                    if let Some(s) = self.hub.list().into_iter().find(|s| s.id == session_id) {
+                        self.extras.open_files_from_terminal(&s, &command, sudo, files, wipe);
+                    }
+                }
+                UiRequest::OpenLocal { path } => {
+                    self.extras.editor.open_local(std::path::Path::new(&path));
+                    self.extras.editor.visible = true;
+                }
             }
         }
         if let Some(rx) = &self.extras.plugin_rx {
@@ -732,6 +745,7 @@ impl App {
                 let mut ic = self.settings.get_bool("intercept_editors", true);
                 if ui.checkbox(&mut ic, "Open vi / vim / nano in Built-in Editor").changed() {
                     self.settings.set("intercept_editors", json!(ic));
+                    self.hub.intercept_editors.store(ic, std::sync::atomic::Ordering::SeqCst);
                 }
                 ui.separator();
                 if ui.add_enabled(!log_on, egui::Button::new("Start Logging...")).clicked() {
@@ -820,6 +834,9 @@ impl App {
     fn sidebar_ui(&mut self, ui: &mut egui::Ui) {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
+            if let Some(tex) = &self.icon {
+                ui.add(egui::Image::new((tex.id(), egui::vec2(24.0, 24.0))));
+            }
             ui.label(RichText::new("TERMINALS").strong().size(14.0).color(theme::TEXT));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui.add(egui::Button::new("\u{00AB}").frame(false)).on_hover_text("Hide sidebar (Ctrl+B)").clicked() {

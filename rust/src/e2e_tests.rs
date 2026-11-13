@@ -225,3 +225,33 @@ fn python_script_drives_a_real_ssh_session() {
     s2.close();
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn ai_editor_commands_open_the_builtin_editor() {
+    use crate::session::UiRequest;
+    use std::sync::atomic::AtomicBool;
+    let Some(srv) = start_server(free_port(), "aiedit") else { return };
+    let (hub, rx) = crate::session::Hub::new();
+    let s = hub.new_session(None);
+    s.connect(ConnSpec::Ssh { host: "127.0.0.1".into(), username: "tester".into(), password: "secret".into(), port: srv.port, look_for_keys: false }).unwrap();
+    assert!(s.wait_for("root@ssh:~#", 10.0, true).unwrap());
+    s.clear_wait_buffer();
+    let out = crate::ai::chat::send_commands(&hub, &[s.clone()], &["sudo vim -R /etc/hosts".to_string(), "echo after".to_string()], 0.4, &Arc::new(AtomicBool::new(false)));
+    // the editor command went to the editor, the next one to the shell
+    match rx.try_recv() {
+        Ok(UiRequest::OpenRemote { files, sudo, wipe, .. }) => {
+            assert_eq!(files, vec!["/etc/hosts".to_string()]);
+            assert!(sudo && !wipe);
+        }
+        _ => panic!("expected an OpenRemote request"),
+    }
+    assert!(out.contains("Opened /etc/hosts in the built-in editor"), "{out}");
+    assert!(out.contains("after"), "{out}");
+    assert!(!s.buf.lock().contains("vim"), "vim must not be typed into the terminal: {}", s.buf.lock());
+    // with interception off the command is typed as before
+    hub.intercept_editors.store(false, std::sync::atomic::Ordering::SeqCst);
+    s.clear_wait_buffer();
+    let out = crate::ai::chat::send_commands(&hub, &[s.clone()], &["vim x".to_string()], 0.5, &Arc::new(AtomicBool::new(false)));
+    assert!(out.contains("sh: vim x: not found"), "{out}");
+    s.close();
+}

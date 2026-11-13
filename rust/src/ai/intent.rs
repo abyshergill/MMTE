@@ -116,6 +116,9 @@ pub fn tools_for_request(q: &str, auto_send: bool) -> Vec<Value> {
         if !specs.is_empty() && re(r"\b(?:connect|launch|open|start)\b").is_match(q).unwrap_or(false) {
             allowed.push("connect_terminal");
         }
+        if re(r"\b(?:open|edit|view|modify|change|display)\b").is_match(q).unwrap_or(false) {
+            allowed.push("open_file");
+        }
         if re(r"\b(?:upload|put)\b").is_match(q).unwrap_or(false) {
             allowed.push("sftp_upload");
         }
@@ -161,5 +164,7 @@ mod tests {
         assert!(names("check the uptime", true).contains(&"send_terminal".to_string()));
         assert!(!names("check the uptime", false).contains(&"send_terminal".to_string()));
         assert!(names("create a terminal named x", false).contains(&"create_terminal".to_string()));
+        assert!(names("open /etc/hosts in the editor", false).contains(&"open_file".to_string()));
+        assert!(!names("how do I open a file", false).contains(&"open_file".to_string()));
     }
 }

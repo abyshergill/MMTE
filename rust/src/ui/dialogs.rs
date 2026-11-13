@@ -92,6 +92,7 @@ pub struct PendingConfirm {
 }
 
 pub struct Dialogs {
+    pub icon: Option<egui::TextureHandle>,
     pub gates: VecDeque<PendingGate>,
     pub confirms: VecDeque<PendingConfirm>,
     pub current: Dlg,
@@ -101,7 +102,7 @@ pub struct Dialogs {
 
 impl Dialogs {
     pub fn new() -> Self {
-        Self { gates: VecDeque::new(), confirms: VecDeque::new(), current: Dlg::None, alerts: VecDeque::new(), inputs: VecDeque::new() }
+        Self { icon: None, gates: VecDeque::new(), confirms: VecDeque::new(), current: Dlg::None, alerts: VecDeque::new(), inputs: VecDeque::new() }
     }
 
     pub fn open_ssh(&mut self, store: &ProfileStore, profile: Option<&str>) {
@@ -151,6 +152,7 @@ impl Dialogs {
     pub fn show(&mut self, ctx: &egui::Context, ssh: &ProfileStore, telnet: &ProfileStore, plugins: &[PluginInfo], plugin_dirs: &[std::path::PathBuf]) -> Vec<Action> {
         let mut actions = Vec::new();
         let mut close = false;
+        let icon = self.icon.clone();
         match &mut self.current {
             Dlg::None => {}
             Dlg::Ssh(f) => {
@@ -388,7 +390,12 @@ impl Dialogs {
             }
             Dlg::About => {
                 dialog_window("About Modern Multi Terminal").show(ctx, |ui| {
-                    ui.heading("Modern Multi Terminal");
+                    ui.horizontal(|ui| {
+                        if let Some(tex) = &icon {
+                            ui.add(egui::Image::new((tex.id(), egui::vec2(64.0, 64.0))));
+                        }
+                        ui.heading("Modern Multi Terminal");
+                    });
                     ui.label("SSH / Serial / Telnet terminal with scripting (Python + Tera Term macros), SFTP and an AI assistant that can use Ollama or hosted LLM APIs.");
                     ui.add_space(4.0);
                     ui.label("Engineered by Aby Shergill · BSD License");

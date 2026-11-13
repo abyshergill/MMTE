@@ -625,6 +625,9 @@ pub enum UiRequest {
     Gate { script: String, reason: String, tail: String, reply: crossbeam_channel::Sender<String> },
     Confirm { title: String, message: String, reply: crossbeam_channel::Sender<bool> },
     Info { title: String, message: String },
+    /// Open files in the built-in editor over the session's SFTP (`wipe`: clear the shell's input line first).
+    OpenRemote { session_id: u64, command: String, sudo: bool, files: Vec<String>, wipe: bool },
+    OpenLocal { path: String },
 }
 
 pub struct Hub {
@@ -632,6 +635,8 @@ pub struct Hub {
     pub active: AtomicU64,
     next_id: AtomicU64,
     pub highlight: AtomicBool,
+    /// Open vi / vim / nano commands in the built-in editor (SSH sessions).
+    pub intercept_editors: AtomicBool,
     pub status: Mutex<String>,
     pub ui_tx: crossbeam_channel::Sender<UiRequest>,
 }
@@ -640,7 +645,7 @@ impl Hub {
     pub fn new() -> (Arc<Hub>, crossbeam_channel::Receiver<UiRequest>) {
         let (tx, rx) = crossbeam_channel::unbounded();
         (
-            Arc::new(Hub { sessions: Mutex::new(Vec::new()), active: AtomicU64::new(0), next_id: AtomicU64::new(1), highlight: AtomicBool::new(true), status: Mutex::new("Ready".into()), ui_tx: tx }),
+            Arc::new(Hub { sessions: Mutex::new(Vec::new()), active: AtomicU64::new(0), next_id: AtomicU64::new(1), highlight: AtomicBool::new(true), intercept_editors: AtomicBool::new(true), status: Mutex::new("Ready".into()), ui_tx: tx }),
             rx,
         )
     }
@@ -724,6 +729,16 @@ impl Hub {
         }
         request_repaint();
         rx.recv().unwrap_or(false)
+    }
+
+    pub fn open_remote_in_editor(&self, session: &Session, command: &str, sudo: bool, files: Vec<String>, wipe: bool) {
+        let _ = self.ui_tx.send(UiRequest::OpenRemote { session_id: session.id, command: command.into(), sudo, files, wipe });
+        request_repaint();
+    }
+
+    pub fn open_local_in_editor(&self, path: &str) {
+        let _ = self.ui_tx.send(UiRequest::OpenLocal { path: path.into() });
+        request_repaint();
     }
 
     pub fn confirm(&self, title: &str, message: &str) -> bool {

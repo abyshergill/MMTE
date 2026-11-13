@@ -77,7 +77,8 @@ pub fn plain_output(raw: &str) -> String {
 }
 
 /// Type `commands` into every session; returns the real output of each.
-pub fn send_commands(sessions: &[Arc<Session>], commands: &[String], delay: f64, cancel: &Arc<AtomicBool>) -> String {
+/// `vi` / `vim` / `nano` commands on SSH sessions open the built-in editor instead of the terminal.
+pub fn send_commands(hub: &Hub, sessions: &[Arc<Session>], commands: &[String], delay: f64, cancel: &Arc<AtomicBool>) -> String {
     let mut parts = Vec::new();
     for s in sessions.iter().take(MAX_SEND_TARGETS) {
         if s.script_running() {
@@ -86,9 +87,17 @@ pub fn send_commands(sessions: &[Arc<Session>], commands: &[String], delay: f64,
         }
         let start = s.buf.lock().len();
         s.start_script("AI commands");
+        let mut opened: Vec<String> = Vec::new();
         for c in commands {
             if cancel.load(Ordering::SeqCst) {
                 break;
+            }
+            if hub.intercept_editors.load(Ordering::SeqCst) && s.conn_kind() == "SSH" {
+                if let Some((sudo, files)) = crate::macrorec::parse_editor_command(c) {
+                    hub.open_remote_in_editor(s, c, sudo, files.clone(), false);
+                    opened.push(format!("Opened {} in the built-in editor (not typed into the terminal).", files.join(", ")));
+                    continue;
+                }
             }
             s.send(&format!("{c}\n"));
             if s.sleep_checkpoint(delay.max(0.2)).is_err() {
@@ -101,7 +110,8 @@ pub fn send_commands(sessions: &[Arc<Session>], commands: &[String], delay: f64,
             b.get(start.min(b.len())..).unwrap_or("").to_string()
         };
         let text = plain_output(&fresh);
-        parts.push(format!("[{}]\n{}", s.name(), if text.is_empty() { "(no output)".to_string() } else { text }));
+        let text = if text.is_empty() && !opened.is_empty() { String::new() } else if text.is_empty() { "(no output)".to_string() } else { text };
+        parts.push(format!("[{}]\n{}", s.name(), [opened.join("\n"), text].into_iter().filter(|x| !x.is_empty()).collect::<Vec<_>>().join("\n")));
     }
     parts.join("\n\n")
 }
@@ -206,6 +216,7 @@ impl ToolCtx<'_> {
                 let out = s.recent_output(6000);
                 format!("[{}]\n{}", s.name(), if out.is_empty() { "[No terminal output yet]".to_string() } else { out })
             }
+            "open_file" => self.tool_open_file(args),
             "sftp_upload" | "sftp_download" => self.tool_sftp(tool, args),
             other => format!("Error: unsupported application tool {other:?}."),
         }
@@ -258,8 +269,31 @@ impl ToolCtx<'_> {
             return format!("Error: {} The command(s) were kept and the user is being asked to connect a terminal; do not claim they ran and do not invent connection details.", notes.join(" "));
         }
         hub.select(&r.sessions[0]);
-        let out = send_commands(&r.sessions, &commands, 0.7, self.cancel);
+        let out = send_commands(hub, &r.sessions, &commands, 0.7, self.cancel);
         std::iter::once(out).chain(notes).collect::<Vec<_>>().join("\n\n")
+    }
+
+    /// `open_file`: show a file in the built-in editor (remote over SFTP for SSH terminals, else local).
+    fn tool_open_file(&self, args: &Value) -> String {
+        if !contains(r"\b(?:open|edit|view|modify|change|display)\b", &self.query) {
+            return "Error: the current user request did not ask to open or edit a file.".into();
+        }
+        let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+        if path.is_empty() || path.chars().count() > 1000 {
+            return "Error: provide a file path.".into();
+        }
+        let tname = args.get("terminal_name").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+        let session = self.resolve_session(&tname);
+        if let Some(s) = session.as_ref().filter(|s| s.is_connected() && s.conn_kind() == "SSH") {
+            self.shared.hub.open_remote_in_editor(s, &format!("vim {path}"), false, vec![path.clone()], false);
+            return format!("Opening {path} from {} in the built-in text editor.", s.name());
+        }
+        let local = std::path::PathBuf::from(shellexpand_home(&path));
+        if local.is_file() {
+            self.shared.hub.open_local_in_editor(&local.to_string_lossy());
+            return format!("Opened {} in the built-in text editor.", local.display());
+        }
+        format!("Error: {path} is not a local file, and no connected SSH terminal was available to open it remotely.")
     }
 
     fn tool_sftp(&self, tool: &str, args: &Value) -> String {
@@ -411,7 +445,7 @@ fn handle_management_request(shared: &Shared, query: &str, tx: &Sender<Event>) -
                 continue;
             }
         }
-        let out = send_commands(&[session.clone()], &[cmd], 0.5, &Arc::new(AtomicBool::new(false)));
+        let out = send_commands(hub, &[session.clone()], &[cmd], 0.5, &Arc::new(AtomicBool::new(false)));
         lines.push(out);
     }
     Some(("Connect and send to requested terminals".into(), lines.join("\n\n")))
@@ -457,7 +491,7 @@ pub fn run_request(shared: &Shared, cfg: &Config, req: &Request, history: &[Valu
     }
     let open_terminals: Vec<Value> = shared.hub.list().iter().map(|s| json!({"name": s.name(), "connected": s.is_connected(), "connection": s.label()})).collect();
     let tools = tools_for_request(&query, auto_run);
-    let mut sys = vec!["You are the agent embedded inside Modern Multi Terminal, a desktop terminal application. The supplied app tools execute real operations in its GUI and embedded terminal sessions. They are the only way to manipulate this app; never suggest xterm, macOS Terminal, or a general shell command for tab operations. Call create_terminal, rename_terminal, connect_terminal, send_terminal, read_terminal, or list_terminals as appropriate. The arguments must contain actual user values, never copy parameter descriptions/schema objects into argument values. Examples: 'launch a new terminal and give name aby' => create_terminal(arguments={name: 'aby'}); 'rename the current Terminal 1 name to Terminal 2' => rename_terminal(arguments={terminal_name: 'current', new_name: 'Terminal 2'}). For explicit requests to type/run/send, call send_terminal with the literal command; the app sends it and returns the terminal output. For log questions use attached output or read_terminal. Wait for tool results and report only what they confirm. For questions asking for an explanation or advice that does not require an app action, answer directly in normal natural language - do not return a JSON tool-call template. Only if an app action is requested and native function calling is unavailable, return one JSON call with a real tool name and actual user-derived values; never return placeholders.".to_string()];
+    let mut sys = vec!["You are the agent embedded inside Modern Multi Terminal, a desktop terminal application. The supplied app tools execute real operations in its GUI and embedded terminal sessions. They are the only way to manipulate this app; never suggest xterm, macOS Terminal, or a general shell command for tab operations. Call create_terminal, rename_terminal, connect_terminal, send_terminal, read_terminal, open_file, or list_terminals as appropriate. To open, view or edit a file for the user, call open_file - it opens the application's built-in text editor; never type vi, vim, nano or cat into a terminal for that. The arguments must contain actual user values, never copy parameter descriptions/schema objects into argument values. Examples: 'launch a new terminal and give name aby' => create_terminal(arguments={name: 'aby'}); 'rename the current Terminal 1 name to Terminal 2' => rename_terminal(arguments={terminal_name: 'current', new_name: 'Terminal 2'}). For explicit requests to type/run/send, call send_terminal with the literal command; the app sends it and returns the terminal output. For log questions use attached output or read_terminal. Wait for tool results and report only what they confirm. For questions asking for an explanation or advice that does not require an app action, answer directly in normal natural language - do not return a JSON tool-call template. Only if an app action is requested and native function calling is unavailable, return one JSON call with a real tool name and actual user-derived values; never return placeholders.".to_string()];
     if advice_only {
         sys.push("CURRENT-TURN PERMISSION: This is an advice/explanation-only turn. No terminal tab or connection mutation is authorized, and no such mutation has been performed for this turn. Explain the app-specific mechanism in natural language. Never claim that you renamed, created, connected, or sent anything.".into());
     }
@@ -549,7 +583,7 @@ pub fn run_commands_and_summarize(shared: &Shared, cfg: &Config, history: &[Valu
     if let Some(s) = sessions.first() {
         shared.hub.select(s);
     }
-    let output = send_commands(sessions, commands, delay, cancel);
+    let output = send_commands(&shared.hub, sessions, commands, delay, cancel);
     let title = format!("Send AI commands to {names}");
     let _ = tx.send(Event::ActionResult { title: title.clone(), output: output.clone() });
     let finish = |streamed: String, failed: bool| {
@@ -717,8 +751,34 @@ mod tests {
         let (hub, _rx) = Hub::new();
         let s = hub.new_session(None);
         s.connect(ConnSpec::Telnet { host: "127.0.0.1".into(), port }).unwrap();
-        let out = send_commands(&[s.clone()], &["hello".to_string()], 0.4, &Arc::new(AtomicBool::new(false)));
+        let out = send_commands(&hub, &[s.clone()], &["hello".to_string()], 0.4, &Arc::new(AtomicBool::new(false)));
         assert!(out.contains("got:hello"), "{out}");
         s.close();
+    }
+}
+
+#[cfg(test)]
+mod open_file_tests {
+    use super::*;
+    use crate::session::UiRequest;
+
+    #[test]
+    fn open_file_tool_opens_local_files_and_is_gated() {
+        let (hub, rx) = Hub::new();
+        hub.new_session(None);
+        let dir = std::env::temp_dir().join(format!("mmte_openfile_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("notes.txt");
+        std::fs::write(&file, "hi").unwrap();
+        let shared = Shared { hub, rag: Arc::new(Mutex::new(RagManager::load_from(dir.join("rag.json")))), proposals: Arc::new(ProposalQueue::default()), blocked: Arc::new(ProposalQueue::default()) };
+        let cancel = Arc::new(AtomicBool::new(false));
+        let flag = AtomicBool::new(false);
+        let mk = |q: &str| ToolCtx { shared: &shared, query: q.into(), user_context: String::new(), allow_send: false, request_session: None, cancel: &cancel, auto_run_flag: &flag };
+        let r = mk("open the notes file in the editor").execute("open_file", &json!({"path": file.to_string_lossy()}));
+        assert!(r.starts_with("Opened"), "{r}");
+        assert!(matches!(rx.try_recv(), Ok(UiRequest::OpenLocal { path }) if path.ends_with("notes.txt")));
+        assert!(mk("tell me a joke").execute("open_file", &json!({"path": "x"})).starts_with("Error"));
+        assert!(mk("open it").execute("open_file", &json!({"path": "/no/such/file"})).starts_with("Error"));
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

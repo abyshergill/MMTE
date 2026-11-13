@@ -534,9 +534,11 @@ impl Extras {
     }
 
     /// `vim file` typed in an SSH terminal: edit the file(s) in the built-in editor over SFTP.
-    pub fn open_files_from_terminal(&mut self, s: &Arc<Session>, command: &str, sudo: bool, files: Vec<String>) {
+    pub fn open_files_from_terminal(&mut self, s: &Arc<Session>, command: &str, sudo: bool, files: Vec<String>, wipe: bool) {
         let Some(spec) = Self::spec_for(s) else { return };
-        s.send("\x15"); // wipe the typed command from the remote shell's input line
+        if wipe {
+            s.send("\x15"); // wipe the typed command from the remote shell's input line
+        }
         let (session, hub, tx, cache) = (s.clone(), self.hub.clone(), self.editor.sender(), self.sftp_cache.clone());
         let command = command.to_string();
         let label = spec.label();
