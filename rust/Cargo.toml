@@ -1,0 +1,24 @@
+[package]
+name = "mmte"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+chrono = "0.4.45"
+crossbeam-channel = "0.5.17"
+dirs = "7.0.0"
+eframe = "0.37.0"
+egui_extras = "0.37.0"
+fancy-regex = "0.20.2"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+once_cell = "1.21.4"
+parking_lot = "0.13.0"
+regex = "1.13.1"
+reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "json", "rustls"] }
+rfd = "0.18.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+serialport = { version = "4.10.1", default-features = false }
+ssh2 = { version = "0.9.7", features = ["vendored-openssl"] }
+vt100 = "0.18.1"
