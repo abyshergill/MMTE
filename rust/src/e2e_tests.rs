@@ -9,10 +9,10 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 
-struct TestServer {
+pub struct TestServer {
     child: Child,
-    port: u16,
-    root: PathBuf,
+    pub port: u16,
+    pub root: PathBuf,
 }
 
 impl Drop for TestServer {
@@ -31,7 +31,7 @@ fn python() -> Option<String> {
     candidates.into_iter().flatten().find(|p| Command::new(p).args(["-c", "import paramiko"]).stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false))
 }
 
-fn start_server(port: u16, tag: &str) -> Option<TestServer> {
+pub fn start_server(port: u16, tag: &str) -> Option<TestServer> {
     let py = python().or_else(|| { eprintln!("E2E SKIPPED: no python+paramiko"); None })?;
     let root = std::env::temp_dir().join(format!("mmte_ssh_{}_{}_{}", tag, std::process::id(), port));
     std::fs::create_dir_all(&root).unwrap();
@@ -46,7 +46,7 @@ fn start_server(port: u16, tag: &str) -> Option<TestServer> {
     Some(TestServer { child, port, root })
 }
 
-fn free_port() -> u16 {
+pub fn free_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
 }
 

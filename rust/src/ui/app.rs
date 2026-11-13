@@ -33,25 +33,28 @@ pub struct App {
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        theme::apply(&cc.egui_ctx);
+        Self::with_parts(&cc.egui_ctx, Settings::load(), ProfileStore::ssh(), ProfileStore::telnet(), plugins::plugin_dirs())
+    }
+
+    /// Build the app from explicit parts (tests use temporary settings and no plugin folders).
+    pub fn with_parts(ctx: &egui::Context, settings: Settings, ssh_profiles: ProfileStore, telnet_profiles: ProfileStore, plugin_dirs: Vec<PathBuf>) -> Self {
+        theme::apply(ctx);
         if std::env::var("MMTE_SCREENSHOT").is_ok() {
-            cc.egui_ctx.set_embed_viewports(true);
+            ctx.set_embed_viewports(true);
         }
-        crate::session::set_repaint_context(cc.egui_ctx.clone());
+        crate::session::set_repaint_context(ctx.clone());
         let (hub, ui_rx) = Hub::new();
-        let settings = Settings::load();
         hub.highlight.store(settings.get_bool("syntax_highlighting", true), std::sync::atomic::Ordering::SeqCst);
         let first = hub.new_session(None);
         if std::env::var("MMTE_DEMO").is_ok() {
             first.local("root@lab:~# ls -l /etc | head -3\r\n\x1b[1;34mdrwxr-xr-x\x1b[0m 3 root root 4096 Nov 12 10:01 \x1b[32mapt\x1b[0m\r\nping 10.0.0.1: 64 bytes, time=0.8 ms, status ok\r\nError: connection refused to https://example.com/x\r\nroot@lab:~# ");
         }
-        let plugin_dirs = plugins::plugin_dirs();
         let mut app = Self {
             hub: hub.clone(),
             ui_rx,
             settings,
-            ssh_profiles: ProfileStore::ssh(),
-            telnet_profiles: ProfileStore::telnet(),
+            ssh_profiles,
+            telnet_profiles,
             plugin_dirs,
             plugins: Vec::new(),
             dialogs: Dialogs::new(),
@@ -1089,5 +1092,188 @@ impl App {
 
     fn dialog_open(&self) -> bool {
         !matches!(self.dialogs.current, Dlg::None) || !self.dialogs.alerts.is_empty() || !self.dialogs.inputs.is_empty() || !self.dialogs.gates.is_empty() || !self.dialogs.confirms.is_empty() || self.extras.any_modal_open()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+
+    fn test_app() -> (App, egui::Context) {
+        let ctx = egui::Context::default();
+        let dir = std::env::temp_dir().join(format!("mmte_app_{}_{}", std::process::id(), std::thread::current().name().unwrap_or("t").replace("::", "_")));
+        let _ = std::fs::create_dir_all(&dir);
+        let app = App::with_parts(&ctx, Settings::load_from(dir.join("s.json")), ProfileStore::load(dir.join("ssh.json")), ProfileStore::load(dir.join("tel.json")), vec![]);
+        (app, ctx)
+    }
+
+    fn key(key: Key, modifiers: egui::Modifiers) -> Event {
+        Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers }
+    }
+
+    fn feed(app: &mut App, ctx: &egui::Context, events: Vec<Event>) {
+        let mut raw = egui::RawInput::default();
+        raw.events = events;
+        let s = app.current().unwrap();
+        ctx.run_pass(raw, |ctx| app.process_keyboard(ctx, &s)).drop_without_applying_deltas();
+    }
+
+    /// Telnet "device": prints a prompt, echoes characters, and records everything it receives.
+    fn device() -> (u16, std::sync::Arc<parking_lot::Mutex<Vec<u8>>>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let got = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let got2 = got.clone();
+        std::thread::spawn(move || {
+            let Ok((mut s, _)) = listener.accept() else { return };
+            let _ = s.write_all(b"root@dev:~# ");
+            let mut buf = [0u8; 256];
+            let mut skip = 0;
+            while let Ok(n) = s.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                got2.lock().extend_from_slice(&buf[..n]);
+                for &b in &buf[..n] {
+                    if skip > 0 {
+                        skip -= 1; // the two bytes after ESC (cursor keys) are not echoed
+                    } else if b == 27 {
+                        skip = 2;
+                    } else if b == b'\r' {
+                        let _ = s.write_all(b"\r\nroot@dev:~# ");
+                    } else if b >= 32 {
+                        let _ = s.write_all(&[b]);
+                    }
+                }
+            }
+        });
+        (port, got)
+    }
+
+    fn connect(app: &mut App, port: u16) -> Arc<Session> {
+        let s = app.current().unwrap();
+        s.connect(ConnSpec::Telnet { host: "127.0.0.1".into(), port }).unwrap();
+        assert!(s.wait_for("root@dev:~#", 5.0, true).unwrap());
+        s
+    }
+
+    #[test]
+    fn typed_command_is_sent_and_recorded_with_its_prompt() {
+        let (mut app, ctx) = test_app();
+        let (port, got) = device();
+        let s = connect(&mut app, port);
+        app.start_macro(&s);
+        feed(&mut app, &ctx, vec![Event::Text("ls -l".into()), key(Key::Enter, Default::default())]);
+        assert!(s.wait_for("ls -l\r\nroot@dev:~#", 5.0, true).unwrap(), "{}", s.buf.lock());
+        assert_eq!(got.lock().as_slice(), b"ls -l\r");
+        let script = s.recorder.lock().as_ref().unwrap().to_python();
+        assert!(script.contains("# [root@dev:~#]"), "{script}");
+        assert!(script.contains("send('ls -l')"), "{script}");
+        assert_eq!(s.recorder.lock().as_ref().unwrap().command_count(), 1);
+    }
+
+    #[test]
+    fn backspace_and_history_keys_still_record_the_visible_command() {
+        let (mut app, ctx) = test_app();
+        let (port, _got) = device();
+        let s = connect(&mut app, port);
+        app.start_macro(&s);
+        // typo fixed with backspace: the model of the typed line follows
+        feed(&mut app, &ctx, vec![Event::Text("pwdd".into()), key(Key::Backspace, Default::default()), key(Key::Enter, Default::default())]);
+        // arrow key edits are not modelled, so the command is read back from the screen
+        s.wait_for("root@dev:~#", 5.0, true).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        feed(&mut app, &ctx, vec![Event::Text("whoami".into()), key(Key::ArrowLeft, Default::default()), key(Key::ArrowRight, Default::default())]);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        feed(&mut app, &ctx, vec![key(Key::Enter, Default::default())]);
+        let script = s.recorder.lock().as_ref().unwrap().to_python();
+        assert!(script.contains("send('pwd')"), "{script}");
+        assert!(script.contains("send('whoami')"), "{script}");
+    }
+
+    #[test]
+    fn control_keys_are_sent_and_recorded() {
+        let (mut app, ctx) = test_app();
+        let (port, got) = device();
+        let s = connect(&mut app, port);
+        app.start_macro(&s);
+        feed(&mut app, &ctx, vec![key(Key::C, egui::Modifiers::CTRL)]);
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(got.lock().contains(&3u8));
+        let script = s.recorder.lock().as_ref().unwrap().to_python();
+        assert!(script.contains("send('\\x03', newline=False)  # Ctrl+C"), "{script}");
+    }
+
+    #[test]
+    fn passwords_are_never_recorded() {
+        let (mut app, ctx) = test_app();
+        let (port, _got) = device();
+        let s = connect(&mut app, port);
+        s.local("\r\nPassword: ");
+        app.start_macro(&s);
+        feed(&mut app, &ctx, vec![Event::Text("hunter2".into()), key(Key::Enter, Default::default())]);
+        let script = s.recorder.lock().as_ref().unwrap().to_python();
+        assert!(!script.contains("hunter2"), "{script}");
+        assert!(script.contains("send(input("), "{script}");
+    }
+
+    #[test]
+    fn pasted_multiline_text_is_recorded_line_by_line() {
+        let (mut app, ctx) = test_app();
+        let (port, got) = device();
+        let s = connect(&mut app, port);
+        app.start_macro(&s);
+        feed(&mut app, &ctx, vec![Event::Paste("echo a\necho b\n".into())]);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert_eq!(got.lock().as_slice(), b"echo a\recho b\r");
+        assert_eq!(s.recorder.lock().as_ref().unwrap().command_count(), 2);
+    }
+
+    #[test]
+    fn disconnected_terminal_echoes_locally() {
+        let (mut app, ctx) = test_app();
+        let s = app.current().unwrap();
+        feed(&mut app, &ctx, vec![Event::Text("abc".into()), key(Key::Backspace, Default::default()), key(Key::Enter, Default::default())]);
+        let lines = s.screen_lines();
+        assert!(lines.iter().any(|l| l.trim() == "ab"), "{lines:?}");
+    }
+
+    #[test]
+    fn ctrl_bracket_disconnects_telnet() {
+        let (mut app, ctx) = test_app();
+        let (port, _got) = device();
+        let s = connect(&mut app, port);
+        feed(&mut app, &ctx, vec![key(Key::CloseBracket, egui::Modifiers::CTRL)]);
+        assert!(!s.is_connected());
+        assert!(s.buf.lock().contains("Ctrl + ] escape"));
+    }
+
+    #[test]
+    fn vim_on_ssh_opens_the_builtin_editor() {
+        let Some(srv) = crate::e2e_tests::start_server(crate::e2e_tests::free_port(), "vim") else { return };
+        std::fs::write(srv.root.join("conf.txt"), "hello\n").unwrap();
+        let (mut app, ctx) = test_app();
+        let s = app.current().unwrap();
+        s.connect(ConnSpec::Ssh { host: "127.0.0.1".into(), username: "tester".into(), password: "secret".into(), port: srv.port, look_for_keys: false }).unwrap();
+        assert!(s.wait_for("root@ssh:~#", 10.0, true).unwrap());
+        app.start_macro(&s);
+        feed(&mut app, &ctx, vec![Event::Text("vim /conf.txt".into()), key(Key::Enter, Default::default())]);
+        for _ in 0..100 {
+            app.extras.editor.poll();
+            if !app.extras.editor.docs.is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert_eq!(app.extras.editor.docs.len(), 1);
+        assert_eq!(app.extras.editor.docs[0].text, "hello\n");
+        let script = s.recorder.lock().as_ref().unwrap().to_python();
+        assert!(script.contains("# opened in the built-in editor: vim /conf.txt"), "{script}");
+        // with interception off the command would have run in the shell instead
+        app.settings.set("intercept_editors", json!(false));
+        s.clear_wait_buffer();
+        feed(&mut app, &ctx, vec![Event::Text("vim /x".into()), key(Key::Enter, Default::default())]);
+        assert!(s.wait_for("sh: vim /x: not found", 10.0, true).unwrap());
     }
 }

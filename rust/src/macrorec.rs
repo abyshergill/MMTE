@@ -6,6 +6,8 @@ use once_cell::sync::Lazy;
 use std::time::Instant;
 
 static PROMPT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^.*?[$#>%]\s+").unwrap());
+// For finding the prompt itself: it may also end the line (the device's echo has not arrived yet).
+static PROMPT_ONLY_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^.*?[$#>%](?:\s+|$)").unwrap());
 static SECRET_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)(pass(word|phrase|code)?|passwd|\bpin\b|secret|token)[^:]{0,40}:\s*$").unwrap());
 
@@ -26,7 +28,7 @@ pub fn extract_command(screen_line: &str) -> String {
 /// The prompt part of a rendered line (`root@a:~#`), or an empty string.
 pub fn extract_prompt(screen_line: &str) -> String {
     let line = screen_line.trim_end();
-    if let Ok(Some(m)) = PROMPT_RE.find(line) {
+    if let Ok(Some(m)) = PROMPT_ONLY_RE.find(line) {
         return m.as_str().trim().to_string();
     }
     String::new()
@@ -294,6 +296,9 @@ mod tests {
     fn extracts() {
         assert_eq!(extract_command("root@a:~# ls -l"), "ls -l");
         assert_eq!(extract_prompt("root@a:~# ls -l"), "root@a:~#");
+        // the echo of the typed command has not arrived yet: the line is only the prompt
+        assert_eq!(extract_prompt("root@a:~#      "), "root@a:~#");
+        assert_eq!(extract_prompt("no prompt here"), "");
         assert!(is_secret_prompt("Password: "));
         assert!(!is_secret_prompt("root@a:~# "));
     }
