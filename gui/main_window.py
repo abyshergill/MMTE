@@ -13,7 +13,7 @@ from time import monotonic as time_monotonic
 from pathlib import Path
 
 from PyQt6.QtCore import QSize, Qt, QTimer, QUrl
-from PyQt6.QtGui import QDesktopServices, QFont, QIcon
+from PyQt6.QtGui import QActionGroup, QDesktopServices, QFont, QIcon
 from PyQt6.QtWidgets import (
     QInputDialog,
     QApplication,
@@ -219,6 +219,17 @@ class TerminalApp(QMainWindow):
         self.stop_macro_action = util_menu.addAction("Stop Macro Recording", self.stop_current_macro)
         self.stop_macro_action.setIcon(icons.stop_icon(size=14))
         self.stop_macro_action.setEnabled(False)
+        self.macro_format_actions = {}
+        format_menu = util_menu.addMenu("Macro Format")
+        format_group = QActionGroup(self)
+        format_group.setExclusive(True)
+        for key, label in (("python", "Python script (.py)"), ("ttl", "Tera Term macro (.ttl)")):
+            action = format_menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(self.macro_format() == key)
+            action.triggered.connect(lambda _checked, k=key: self.set_macro_format(k))
+            format_group.addAction(action)
+            self.macro_format_actions[key] = action
         util_menu.addSeparator()
         util_menu.addAction("Clear Terminal", self.clear_terminal)
         self.highlight_action = util_menu.addAction("Terminal Syntax Highlighting", self.toggle_syntax_highlighting)
@@ -1448,6 +1459,30 @@ class TerminalApp(QMainWindow):
             return f"connect_serial({conn.port!r}, {getattr(conn, 'baudrate', 115200)})"
         return ""
 
+    def macro_format(self) -> str:
+        """``"python"`` or ``"ttl"``: what recorded macros are saved as."""
+        value = str(self.settings.get("macro_format", "python")).lower()
+        return "ttl" if value == "ttl" else "python"
+
+    def set_macro_format(self, key: str) -> None:
+        key = "ttl" if key == "ttl" else "python"
+        self.settings.set("macro_format", key)
+        for name, action in getattr(self, "macro_format_actions", {}).items():
+            action.setChecked(name == key)
+        self.status_label.setText("Recorded macros are saved as " + ("Tera Term (.ttl)" if key == "ttl" else "Python (.py)"))
+
+    @staticmethod
+    def _connect_hint_ttl(session: TerminalSession) -> str:
+        conn = session.connection
+        label = getattr(conn, "label", "")
+        if label == "SSH":
+            return f"connect '{conn.host} /ssh /user={conn.username} /passwd=PASSWORD /port={conn.port}'"
+        if label == "Telnet":
+            return f"connect '{conn.host} /telnet /port={conn.port}'"
+        if label == "Serial":
+            return f"(serial {conn.port}: connect the terminal before replaying)"
+        return ""
+
     def start_macro_recording(self, session: TerminalSession) -> None:
         if session not in self.sessions or session.recorder is not None:
             return
@@ -1464,12 +1499,18 @@ class TerminalApp(QMainWindow):
     def stop_macro_recording(
         self, session: TerminalSession, ask_to_save: bool = True, open_in_editor: bool = True
     ) -> str | None:
-        """Stop recording, generate the Python script and save / open it. Returns the script."""
+        """Stop recording, generate the macro (Python or Tera Term, see Utility > Macro Format) and
+        save / open it. Returns the script."""
         recorder = session.recorder
         if recorder is None:
             return None
         session.recorder = None
-        script = recorder.to_python()
+        ttl = self.macro_format() == "ttl"
+        if ttl:
+            hint = self._connect_hint_ttl(session) if recorder.connect_hint else ""
+            script, ext, language, filter_name = recorder.to_ttl(hint), "ttl", "teraterm", "Tera Term Macro (*.ttl)"
+        else:
+            script, ext, language, filter_name = recorder.to_python(), "py", "python", "Python Script (*.py)"
         if session in self.sessions:
             self._update_tab_text(session)
             if session is self.active_session:
@@ -1478,12 +1519,12 @@ class TerminalApp(QMainWindow):
 
         macro_dir = CONFIG_DIR / "macros"
         safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", session.name).strip("_") or "terminal"
-        default_path = macro_dir / f"macro_{safe}_{recorder.started_wall:%Y%m%d_%H%M%S}.py"
+        default_path = macro_dir / f"macro_{safe}_{recorder.started_wall:%Y%m%d_%H%M%S}.{ext}"
         saved_path = None
         if ask_to_save:
             macro_dir.mkdir(parents=True, exist_ok=True)
             path, _ = QFileDialog.getSaveFileName(
-                self, "Save Recorded Macro", str(default_path), "Python Script (*.py);;All Files (*.*)"
+                self, "Save Recorded Macro", str(default_path), f"{filter_name};;All Files (*.*)"
             )
             if path:
                 try:
@@ -1497,7 +1538,7 @@ class TerminalApp(QMainWindow):
             if saved_path:
                 editor.open_local(saved_path)
             else:
-                editor.open_text(default_path.name, script, language="python", suggested_path=str(default_path))
+                editor.open_text(default_path.name, script, language=language, suggested_path=str(default_path))
         return script
 
     def _update_recording_ui(self, s: TerminalSession) -> None:

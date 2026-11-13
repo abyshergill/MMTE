@@ -34,6 +34,7 @@ the text editor, the Multi-Script Suite, plugins and the AI assistant, and reads
 
 ## 🆕 What's New
 
+* **Macro format.** **Utility → Macro Format** chooses whether a recording is saved as a Python script or a Tera Term `.ttl` macro. The `.ttl` interpreter also understands `#13`-style character codes, joined strings (`'it'#39's'`), `inputbox` and `passwordbox`.
 * **Python plugins.** Drop a `.py` file in `plugins/` (or `~/.modern_multi_terminal_emulator/plugins`) with a `register(api)` function. Plugins can add menu items under **Plugins**, add functions to Python scripts and react to terminal output. **Plugins → New Plugin from Template** creates a starter file. See `plugins/example_hello.py`.
 * **Readable logs.** Colour codes and cursor control sequences are stripped from log files, and typed text is no longer logged twice.
 * **Macros keep the prompt.** Recorded macros show the prompt each command was typed at, e.g. `# [root@a:~#]`, and no longer print banners into the terminal.
