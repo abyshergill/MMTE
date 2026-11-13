@@ -102,6 +102,26 @@ CONTROL_KEY_NAMES = {
 }
 
 
+def ttl_quote(text: str) -> str:
+    """Tera Term string literal: ``'text'`` with ``#n`` character codes for quotes and control characters."""
+    out: list[str] = []
+    open_quote = False
+    for ch in text:
+        if ch == "'" or ord(ch) < 0x20 or ord(ch) == 0x7F:
+            if open_quote:
+                out.append("'")
+                open_quote = False
+            out.append(f"#{ord(ch)}")
+        else:
+            if not open_quote:
+                out.append("'")
+                open_quote = True
+            out.append(ch)
+    if open_quote:
+        out.append("'")
+    return "".join(out) or "''"
+
+
 @dataclass
 class MacroStep:
     delay: float           # seconds since the previous step
@@ -152,6 +172,48 @@ class MacroRecorder:
         return max(0.0, self.clock() - self.started_at)
 
     # --- output ----------------------------------------------------------------
+    def to_ttl(self, ttl_connect_hint: str = "") -> str:
+        """The recording as a Tera Term macro (``.ttl``); it replays with Scripting > Run Script."""
+        total = self.elapsed()
+        lines = [
+            "; Macro recorded with Modern Multi Terminal Emulator",
+            f"; Terminal : {self.session_name} ({self.connection_label})",
+            f"; Recorded : {self.started_wall:%Y-%m-%d %H:%M:%S}  -  {self.command_count} command(s)  -  {total:.1f} s",
+            ";",
+            "; Replay: Scripting > Run Script...",
+            "; Each command is preceded by a comment with the prompt it was typed at, e.g. ; [root@a:~#]",
+            "; mpause waits as long as you did while recording (milliseconds). Delete a line for a faster replay,",
+            "; or replace it with  wait '$ '  to continue as soon as the prompt appears.",
+            "",
+        ]
+        if ttl_connect_hint:
+            lines += [
+                "; The terminal was already connected when recording started. To connect from the",
+                "; macro instead, uncomment the next line:",
+                f"; {ttl_connect_hint}",
+                "",
+            ]
+        for step in self.steps:
+            delay_ms = int(round(step.delay * 10)) * 100
+            if delay_ms >= 100:
+                lines.append(f"mpause {delay_ms}")
+            if step.kind in ("line", "secret") and step.prompt:
+                lines.append(f"; [{step.prompt}]")
+            if step.kind == "line":
+                lines.append(f"sendln {ttl_quote(step.text)}")
+            elif step.kind == "secret":
+                label = step.comment or "Password"
+                lines.append("; hidden input - the password is not stored in the macro")
+                lines.append(f"passwordbox {ttl_quote(label)} 'Macro'")
+                lines.append("sendln inputstr")
+            elif step.kind == "keys":
+                note = f"  ; {step.comment}" if step.comment else ""
+                lines.append(f"send {ttl_quote(step.text)}{note}")
+            elif step.kind == "note":
+                lines.append(f"; {step.text}")
+        lines.append("end")
+        return "\n".join(lines) + "\n"
+
     def to_python(self) -> str:
         total = self.elapsed()
         lines = [

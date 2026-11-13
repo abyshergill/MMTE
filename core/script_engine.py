@@ -33,17 +33,22 @@ class TeraTermMacroRunner:
                 parts = line.split("=", 1)
                 var_name, var_value = parts[0].strip(), parts[1].strip()
                 if var_name.isidentifier():
-                    self.variables[var_name] = self._unquote(var_value)
+                    self.variables[var_name] = self._text(var_value)
                     continue
             cmd, arg = self._split_command(line)
             cmd = cmd.lower()
-            if arg in self.variables: arg = self.variables[arg]
+            literal = self.variables.get(arg)  # a variable's value is already final text
+            if literal is not None: arg = literal
             if cmd == "end":
                 break
             if cmd == "connect": self._connect(arg)
-            elif cmd == "wait": self._wait(arg)
-            elif cmd == "sendln": self.session.send(self._unquote(arg) + "\n")
-            elif cmd == "send": self.session.send(self._unquote(arg))
+            elif cmd == "wait": self._wait(arg, literal)
+            elif cmd == "sendln": self.session.send((literal if literal is not None else self._text(arg)) + "\n")
+            elif cmd == "send": self.session.send(literal if literal is not None else self._text(arg))
+            elif cmd in {"inputbox", "passwordbox"}:
+                parts = shlex.split(arg) if arg else []
+                message = self._text(parts[0]) if parts else ""
+                self.variables["inputstr"] = self._ask_input(message, password=(cmd == "passwordbox"))
             elif cmd in {"pause", "mpause"}:
                 delay = float(self._unquote(arg) or "1")
                 if cmd == "mpause": delay /= 1000
@@ -71,6 +76,57 @@ class TeraTermMacroRunner:
         text = text.strip()
         return text[1:-1] if len(text) >= 2 and text[0] == text[-1] and text[0] in {"'", '"'} else text
 
+    def _text(self, arg: str) -> str:
+        """Tera Term string syntax: 'text', "text", #13 character codes and their concatenation
+        (``'it'#39's'``).  Anything else is returned as is."""
+        text = arg.strip()
+        if not text or text[0] not in "'\"#":
+            return text
+        out: list[str] = []
+        i = 0
+        while i < len(text):
+            ch = text[i]
+            if ch in "'\"":
+                end = text.find(ch, i + 1)
+                end = len(text) if end == -1 else end
+                out.append(text[i + 1:end])
+                i = end + 1
+            elif ch == "#":
+                j = i + 1
+                while j < len(text) and text[j].isdigit():
+                    j += 1
+                if j > i + 1:
+                    try:
+                        out.append(chr(int(text[i + 1:j])))
+                    except (ValueError, OverflowError):
+                        pass
+                i = j
+            else:
+                i += 1
+        return "".join(out)
+
+    def _ask_input(self, message: str, password: bool = False) -> str:
+        """``inputbox`` / ``passwordbox``: ask the user (on the GUI thread) and return the answer."""
+        done = threading.Event()
+        answer = {"value": ""}
+
+        def show():
+            try:
+                dialog = QInputDialog(self.app)
+                dialog.setWindowTitle("Script Input")
+                dialog.setLabelText(message)
+                dialog.setTextEchoMode(QLineEdit.EchoMode.Password if password else QLineEdit.EchoMode.Normal)
+                if dialog.exec() == QDialog.DialogCode.Accepted:
+                    answer["value"] = dialog.textValue()
+            except Exception as exc:
+                print(f"Input dialog failed: {exc}", file=sys.stderr)
+            finally:
+                done.set()
+
+        self.app.after(0, show)
+        done.wait()
+        return answer["value"]
+
     def _sleep_checkpoint(self, seconds: float) -> None:
         """time.sleep() that stays responsive to Pause/Stop."""
         deadline = time.time() + seconds
@@ -81,8 +137,8 @@ class TeraTermMacroRunner:
                 return
             time.sleep(min(0.2, remaining))
 
-    def _wait(self, arg: str) -> None:
-        pattern = self._unquote(arg)
+    def _wait(self, arg: str, literal: str | None = None) -> None:
+        pattern = literal if literal is not None else self._text(arg)
         if not pattern: return
         if not self.session.wait_for(pattern, self.default_timeout, case_sensitive=True):
             raise TimeoutError(f"wait timed out for: {pattern}")

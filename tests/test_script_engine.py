@@ -249,3 +249,35 @@ def _drain_all(q: "queue.Queue[str]") -> list[str]:
     while not q.empty():
         out.append(q.get_nowait())
     return out
+
+
+# --- Tera Term string syntax, character codes and input boxes -----------------
+
+def test_text_handles_character_codes_and_concatenation(runner):
+    assert runner._text("'it'#39's'") == "it's"
+    assert runner._text("#3") == "\x03"
+    assert runner._text("'a;b'#13#10") == "a;b\r\n"
+    assert runner._text("plain") == "plain"
+    assert runner._text('"x"') == "x"
+
+
+def test_run_file_sends_control_characters_and_quotes(tmp_path, fake_app):
+    session = RecordingSession(fake_app)
+    runner = TeraTermMacroRunner(fake_app, session)
+    ttl = tmp_path / "keys.ttl"
+    ttl.write_text("send #3\nsendln 'echo '#39'x'#39\nend\n", encoding="utf-8")
+    runner.run_file(str(ttl))
+    assert session.sent == ["\x03", "echo 'x'\n"]
+
+
+def test_passwordbox_answer_is_sent_verbatim(tmp_path, fake_app, monkeypatch):
+    session = RecordingSession(fake_app)
+    runner = TeraTermMacroRunner(fake_app, session)
+    asked = []
+    # a password that looks like Tera Term syntax must not be re-interpreted
+    monkeypatch.setattr(runner, "_ask_input", lambda message, password=False: asked.append((message, password)) or "#12'ab")
+    ttl = tmp_path / "pw.ttl"
+    ttl.write_text("passwordbox 'Password:' 'Macro'\nsendln inputstr\ninputbox 'Name' 'Macro'\nsend inputstr\nend\n", encoding="utf-8")
+    runner.run_file(str(ttl))
+    assert asked == [("Password:", True), ("Name", False)]
+    assert session.sent == ["#12'ab\n", "#12'ab"]
