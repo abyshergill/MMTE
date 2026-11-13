@@ -85,6 +85,9 @@ impl App {
                 "plugins" => self.dialogs.current = Dlg::PluginManager,
                 "suite" => self.extras.daw.open = true,
                 "profiles" => self.extras.profiles_open = true,
+                "ai" => self.extras.ai.demo(),
+                "llm" => self.extras.ai.open_settings(),
+                "rag" => self.extras.ai.open_rag(),
                 "editor" => {
                     self.extras.editor.open_text("demo.py", "# demo\ndef hello(name):\n    \"\"\"Say hi\"\"\"\n    print('hello', name, 42)\n    return True\n".into(), "python", None);
                 }

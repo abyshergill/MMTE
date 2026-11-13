@@ -1,5 +1,8 @@
+mod ai;
 mod config;
 mod conn;
+#[cfg(test)]
+mod e2e_tests;
 mod editlogic;
 mod highlight;
 mod logclean;

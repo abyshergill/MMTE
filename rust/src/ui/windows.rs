@@ -634,6 +634,16 @@ impl super::app::App {
         self.daw_window(ctx);
         self.profiles_window(ctx);
         self.extras.ai.windows(ctx, &self.hub);
+        if let Some((id, kind)) = self.extras.ai.take_connect_request() {
+            if let Some(s) = self.hub.list().into_iter().find(|s| s.id == id) {
+                self.hub.select(&s);
+                match kind {
+                    "ssh" => self.dialogs.open_ssh(&self.ssh_profiles, None),
+                    "telnet" => self.dialogs.open_telnet(&self.telnet_profiles, None),
+                    _ => self.dialogs.open_serial(),
+                }
+            }
+        }
     }
 
     fn daw_window(&mut self, ctx: &egui::Context) {
