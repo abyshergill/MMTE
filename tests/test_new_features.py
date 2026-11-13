@@ -11,7 +11,7 @@ from PyQt6.QtCore import QEvent, QTimer, Qt
 from PyQt6.QtGui import QKeyEvent
 
 import main as main_module
-from core.macro_recorder import MacroRecorder, extract_command, is_secret_prompt, parse_editor_command
+from core.macro_recorder import MacroRecorder, extract_command, is_secret_prompt, parse_editor_command, ttl_quote
 from core.terminal_highlight import highlight_spans
 
 
@@ -239,7 +239,60 @@ def test_recorder_generates_runnable_script_with_timing():
     ]
 
 
+def test_ttl_quote_uses_character_codes():
+    assert ttl_quote("ls -l") == "'ls -l'"
+    assert ttl_quote("echo it's ok") == "'echo it'#39's ok'"
+    assert ttl_quote("\x03") == "#3"
+    assert ttl_quote("a\tb") == "'a'#9'b'"
+    assert ttl_quote("") == "''"
+
+
+def test_recorder_generates_ttl_macro():
+    ticks = iter([0.0, 1.5, 4.0, 4.0, 9.0, 10.0])
+    rec = MacroRecorder("T1", "Telnet h", clock=lambda: next(ticks))
+    rec.record_line("show version", where="root@a:~#")
+    rec.record_line("", secret=True, prompt="Password:")
+    rec.record_keys("\x03")
+    rec.record_line("echo 'x'")
+    ttl = rec.to_ttl("connect 'h /telnet /port=23'")
+    assert "mpause 1500\n; [root@a:~#]\nsendln 'show version'" in ttl
+    assert "passwordbox 'Password:' 'Macro'\nsendln inputstr" in ttl
+    assert "send #3  ; Ctrl+C" in ttl
+    assert "sendln 'echo '#39'x'#39" in ttl
+    assert "; connect 'h /telnet /port=23'" in ttl
+    assert ttl.rstrip().endswith("end")
+
+
 # --- macro recording in the main window --------------------------------------------------------
+
+def test_macro_format_menu_and_setting(app_window):
+    assert app_window.macro_format() == "python"
+    assert app_window.macro_format_actions["python"].isChecked()
+    app_window.macro_format_actions["ttl"].trigger()
+    assert app_window.macro_format() == "ttl"
+    assert app_window.settings.get("macro_format") == "ttl"
+    assert app_window.macro_format_actions["ttl"].isChecked() and not app_window.macro_format_actions["python"].isChecked()
+
+
+def test_recording_saves_a_ttl_macro_when_chosen(app_window):
+    s = app_window.sessions[0]
+    s.connection = FakeSSH()
+    app_window.set_macro_format("ttl")
+    app_window.start_macro_recording(s)
+    _type(app_window, s, "show version")
+    _enter(app_window, s)
+    s.append("\r\nPassword: ")
+    _type(app_window, s, "hunter2")
+    _enter(app_window, s)
+    script = app_window.stop_macro_recording(s, ask_to_save=False)
+    assert "sendln 'show version'" in script
+    assert "hunter2" not in script
+    assert "passwordbox" in script
+    assert "connect '10.0.0.1 /ssh /user=aby" in script
+    doc = app_window._text_editor.documents[0]
+    assert doc.title.endswith(".ttl")
+    assert doc.highlighter.language == "teraterm"
+
 
 def test_recording_captures_typed_commands_and_hides_passwords(app_window):
     s = app_window.sessions[0]

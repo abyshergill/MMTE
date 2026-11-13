@@ -12,6 +12,7 @@ SETTINGS_FILE = CONFIG_DIR / "app_settings.json"
 DEFAULTS: dict[str, object] = {
     "syntax_highlighting": True,       # colourise plain terminal output
     "intercept_editors": True,         # open vi / vim / nano in the built-in editor (SSH)
+    "macro_format": "python",          # recorded macros are saved as "python" or Tera Term "ttl"
     "editor_word_wrap": False,
     "editor_font_size": 12,
 }

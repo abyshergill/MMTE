@@ -12,9 +12,10 @@ import uuid
 from time import monotonic as time_monotonic
 from pathlib import Path
 
-from PyQt6.QtCore import QSize, Qt, QTimer
-from PyQt6.QtGui import QFont, QIcon
+from PyQt6.QtCore import QSize, Qt, QTimer, QUrl
+from PyQt6.QtGui import QActionGroup, QDesktopServices, QFont, QIcon
 from PyQt6.QtWidgets import (
+    QInputDialog,
     QApplication,
     QDialog,
     QDockWidget,
@@ -42,7 +43,8 @@ from core.connections import BaseConnection, SSHConnection, SerialConnection, Te
 from core.models import ScriptStopped, TerminalSession
 from core.profile_store import ProfileStore
 from core.script_engine import TeraTermMacroRunner, execute_python_script_sync
-from core.macro_recorder import MacroRecorder, extract_command, is_secret_prompt, parse_editor_command
+from core.plugins import PluginManager, USER_PLUGIN_DIR
+from core.macro_recorder import MacroRecorder, extract_command, extract_prompt, is_secret_prompt, parse_editor_command
 from core.sftp_hops import get_active_sftp, get_hops
 from core.theme import TERMINAL_BG
 from gui import icons
@@ -86,6 +88,9 @@ class TerminalApp(QMainWindow):
         self.active_session: TerminalSession | None = None
         self.session_list_rows: dict[TerminalSession, QListWidgetItem] = {}
 
+        self.plugins = PluginManager(self)
+        self.plugins.load_all()
+
         self._build_ui()
         self.new_terminal()
 
@@ -118,6 +123,71 @@ class TerminalApp(QMainWindow):
     def toggle_sidebar(self):
         self.sidebar.setVisible(not self.sidebar.isVisible())
         self._sidebar_btn.setText("\u276f" if not self.sidebar.isVisible() else "\u276e")
+        self.sidebar_show_btn.setVisible(not self.sidebar.isVisible())
+
+    # --- plugins --------------------------------------------------------------------
+    def _build_plugins_menu(self) -> None:
+        menu = self._plugins_menu
+        menu.clear()
+        any_actions = False
+        for info in self.plugins.plugins:
+            if info.loaded and info.menu_actions:
+                sub = menu.addMenu(info.name)
+                for text, callback, shortcut in info.menu_actions:
+                    action = sub.addAction(text, lambda cb=callback: self._run_plugin_callback(cb))
+                    if shortcut:
+                        action.setShortcut(shortcut)
+                any_actions = True
+        if any_actions:
+            menu.addSeparator()
+        menu.addAction("Plugin Manager...", self.show_plugin_manager)
+        menu.addAction("New Plugin from Template...", self.new_plugin_from_template)
+        menu.addAction("Open Plugins Folder", self.open_plugins_folder)
+        menu.addAction("Reload Plugins", self.reload_plugins)
+
+    def _run_plugin_callback(self, callback) -> None:
+        try:
+            callback()
+        except Exception as exc:
+            QMessageBox.warning(self, "Plugin error", f"{exc.__class__.__name__}: {exc}")
+
+    def reload_plugins(self) -> None:
+        self.plugins.load_all()
+        self._build_plugins_menu()
+        loaded = sum(1 for p in self.plugins.plugins if p.loaded)
+        self.status_label.setText(f"Plugins reloaded: {loaded} of {len(self.plugins.plugins)} loaded")
+
+    def show_plugin_manager(self) -> None:
+        lines = []
+        for p in self.plugins.plugins:
+            head = f"{'OK ' if p.loaded else 'FAILED '} {p.name} {p.version}".rstrip()
+            lines.append(f"{head}\n    {p.path}")
+            if p.description:
+                lines.append(f"    {p.description}")
+            if p.error:
+                lines.append(f"    Error: {p.error}")
+        body = "\n".join(lines) or "No plugins found."
+        QMessageBox.information(
+            self, "Plugin Manager", f"{body}\n\nPlugin folders:\n  {USER_PLUGIN_DIR}\n  " +
+            "\n  ".join(str(d) for d in self.plugins.directories if d != USER_PLUGIN_DIR)
+        )
+
+    def new_plugin_from_template(self) -> None:
+        name, ok = QInputDialog.getText(self, "New Plugin", "Plugin file name:", text="my_plugin")
+        if not ok or not name.strip():
+            return
+        try:
+            path = PluginManager.create_from_template(name)
+        except Exception as exc:
+            QMessageBox.warning(self, "New Plugin", str(exc))
+            return
+        self.text_editor().open_local(str(path))
+        self.text_editor().show_and_raise()
+        self.status_label.setText(f"Created {path}. Save it, then Plugins > Reload Plugins.")
+
+    def open_plugins_folder(self) -> None:
+        USER_PLUGIN_DIR.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(USER_PLUGIN_DIR)))
 
     def _build_menu_bar(self):
         menubar = self.menuBar()
@@ -149,6 +219,17 @@ class TerminalApp(QMainWindow):
         self.stop_macro_action = util_menu.addAction("Stop Macro Recording", self.stop_current_macro)
         self.stop_macro_action.setIcon(icons.stop_icon(size=14))
         self.stop_macro_action.setEnabled(False)
+        self.macro_format_actions = {}
+        format_menu = util_menu.addMenu("Macro Format")
+        format_group = QActionGroup(self)
+        format_group.setExclusive(True)
+        for key, label in (("python", "Python script (.py)"), ("ttl", "Tera Term macro (.ttl)")):
+            action = format_menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(self.macro_format() == key)
+            action.triggered.connect(lambda _checked, k=key: self.set_macro_format(k))
+            format_group.addAction(action)
+            self.macro_format_actions[key] = action
         util_menu.addSeparator()
         util_menu.addAction("Clear Terminal", self.clear_terminal)
         self.highlight_action = util_menu.addAction("Terminal Syntax Highlighting", self.toggle_syntax_highlighting)
@@ -188,6 +269,9 @@ class TerminalApp(QMainWindow):
 
         except Exception as e:
             print(f"Failed to attach AI Dock Panel: {e}", file=sys.stderr)
+
+        self._plugins_menu = menubar.addMenu("&Plugins")
+        self._build_plugins_menu()
 
         help_menu = menubar.addMenu("&Help")
         help_menu.addAction("Sample Scripts && Templates...", lambda: SamplesDialog(self).exec())
@@ -262,6 +346,15 @@ class TerminalApp(QMainWindow):
         content_layout.setContentsMargins(12, 8, 12, 4)
 
         header_row = QHBoxLayout()
+        self.sidebar_show_btn = QToolButton()
+        self.sidebar_show_btn.setObjectName("NewTabBtn")
+        self.sidebar_show_btn.setText("\u276f")
+        self.sidebar_show_btn.setFixedSize(28, 28)
+        self.sidebar_show_btn.setToolTip("Show the sidebar (Ctrl+B)")
+        self.sidebar_show_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.sidebar_show_btn.clicked.connect(self.toggle_sidebar)
+        self.sidebar_show_btn.hide()
+        header_row.addWidget(self.sidebar_show_btn)
         self.header_label = QLabel("No terminal")
         header_font = QFont()
         header_font.setPointSize(12)
@@ -1029,9 +1122,9 @@ class TerminalApp(QMainWindow):
     def _run_ttl(self, s: TerminalSession, p: str):
         s.start_script(Path(p).name)
         try:
-            s.incoming.put(f"\r\n[Running TTL: {p}]\r\n")
+            self.after(0, lambda: self.status_label.setText(f"Running TTL: {p}"))
             TeraTermMacroRunner(self, s).run_file(p)
-            s.incoming.put("\r\n[TTL completed]\r\n")
+            self.after(0, lambda: self.status_label.setText(f"TTL completed: {Path(p).name}"))
         except ScriptStopped:
             s.incoming.put("\r\n[TTL stopped by user]\r\n")
         except Exception as exc:
@@ -1051,9 +1144,9 @@ class TerminalApp(QMainWindow):
         elif script_name:
             s.script_name = script_name
         try:
-            s.incoming.put(f"\r\n[Running Python: {p}]\r\n")
+            self.after(0, lambda: self.status_label.setText(f"Running Python: {p}"))
             execute_python_script_sync(s, p)
-            s.incoming.put("\r\n[Python completed]\r\n")
+            self.after(0, lambda: self.status_label.setText(f"Python completed: {Path(p).name}"))
         except ScriptStopped:
             s.incoming.put("\r\n[Python script stopped by user]\r\n")
         except Exception as exc:
@@ -1086,7 +1179,6 @@ class TerminalApp(QMainWindow):
 
         def worker():
             try:
-                s.incoming.put(f"\r\n[Running app-native AI automation: {script_name}]\r\n")
                 self._run_python(s, script_path, script_name=script_name, already_started=True)
             finally:
                 try:
@@ -1217,7 +1309,7 @@ class TerminalApp(QMainWindow):
                 command = session.typed_line if not session.typed_line_dirty else extract_command(
                     self._cursor_line(session)
                 )
-                session.recorder.record_line(command)
+                session.recorder.record_line(command, where=extract_prompt(self._cursor_line(session)))
             session.typed_line, session.typed_line_dirty = "", False
         session.typed_line += pieces[-1]
 
@@ -1253,7 +1345,9 @@ class TerminalApp(QMainWindow):
                 return True
 
         if session.recorder is not None:
-            session.recorder.record_line(command, secret=secret, prompt=screen_line.strip()[-60:])
+            session.recorder.record_line(
+                command, secret=secret, prompt=screen_line.strip()[-60:], where=extract_prompt(screen_line)
+            )
         return False
 
     def _open_files_from_terminal(self, session: TerminalSession, command: str, sudo: bool, files: list[str]) -> None:
@@ -1365,6 +1459,30 @@ class TerminalApp(QMainWindow):
             return f"connect_serial({conn.port!r}, {getattr(conn, 'baudrate', 115200)})"
         return ""
 
+    def macro_format(self) -> str:
+        """``"python"`` or ``"ttl"``: what recorded macros are saved as."""
+        value = str(self.settings.get("macro_format", "python")).lower()
+        return "ttl" if value == "ttl" else "python"
+
+    def set_macro_format(self, key: str) -> None:
+        key = "ttl" if key == "ttl" else "python"
+        self.settings.set("macro_format", key)
+        for name, action in getattr(self, "macro_format_actions", {}).items():
+            action.setChecked(name == key)
+        self.status_label.setText("Recorded macros are saved as " + ("Tera Term (.ttl)" if key == "ttl" else "Python (.py)"))
+
+    @staticmethod
+    def _connect_hint_ttl(session: TerminalSession) -> str:
+        conn = session.connection
+        label = getattr(conn, "label", "")
+        if label == "SSH":
+            return f"connect '{conn.host} /ssh /user={conn.username} /passwd=PASSWORD /port={conn.port}'"
+        if label == "Telnet":
+            return f"connect '{conn.host} /telnet /port={conn.port}'"
+        if label == "Serial":
+            return f"(serial {conn.port}: connect the terminal before replaying)"
+        return ""
+
     def start_macro_recording(self, session: TerminalSession) -> None:
         if session not in self.sessions or session.recorder is not None:
             return
@@ -1374,7 +1492,6 @@ class TerminalApp(QMainWindow):
             connect_hint=self._connect_hint(session),
         )
         session.typed_line, session.typed_line_dirty = "", False
-        session.incoming.put("\r\n[Macro recording started - Utility > Stop Macro Recording to finish]\r\n")
         self._update_tab_text(session)
         self.select_session(session)
         self.status_label.setText(f"Recording macro on {session.name}")
@@ -1382,14 +1499,19 @@ class TerminalApp(QMainWindow):
     def stop_macro_recording(
         self, session: TerminalSession, ask_to_save: bool = True, open_in_editor: bool = True
     ) -> str | None:
-        """Stop recording, generate the Python script and save / open it. Returns the script."""
+        """Stop recording, generate the macro (Python or Tera Term, see Utility > Macro Format) and
+        save / open it. Returns the script."""
         recorder = session.recorder
         if recorder is None:
             return None
         session.recorder = None
-        script = recorder.to_python()
+        ttl = self.macro_format() == "ttl"
+        if ttl:
+            hint = self._connect_hint_ttl(session) if recorder.connect_hint else ""
+            script, ext, language, filter_name = recorder.to_ttl(hint), "ttl", "teraterm", "Tera Term Macro (*.ttl)"
+        else:
+            script, ext, language, filter_name = recorder.to_python(), "py", "python", "Python Script (*.py)"
         if session in self.sessions:
-            session.incoming.put(f"\r\n[Macro recording stopped - {recorder.command_count} command(s)]\r\n")
             self._update_tab_text(session)
             if session is self.active_session:
                 self._update_recording_ui(session)
@@ -1397,12 +1519,12 @@ class TerminalApp(QMainWindow):
 
         macro_dir = CONFIG_DIR / "macros"
         safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", session.name).strip("_") or "terminal"
-        default_path = macro_dir / f"macro_{safe}_{recorder.started_wall:%Y%m%d_%H%M%S}.py"
+        default_path = macro_dir / f"macro_{safe}_{recorder.started_wall:%Y%m%d_%H%M%S}.{ext}"
         saved_path = None
         if ask_to_save:
             macro_dir.mkdir(parents=True, exist_ok=True)
             path, _ = QFileDialog.getSaveFileName(
-                self, "Save Recorded Macro", str(default_path), "Python Script (*.py);;All Files (*.*)"
+                self, "Save Recorded Macro", str(default_path), f"{filter_name};;All Files (*.*)"
             )
             if path:
                 try:
@@ -1416,7 +1538,7 @@ class TerminalApp(QMainWindow):
             if saved_path:
                 editor.open_local(saved_path)
             else:
-                editor.open_text(default_path.name, script, language="python", suggested_path=str(default_path))
+                editor.open_text(default_path.name, script, language=language, suggested_path=str(default_path))
         return script
 
     def _update_recording_ui(self, s: TerminalSession) -> None:

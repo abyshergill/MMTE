@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import pyte
 from PyQt6.QtGui import QTextCharFormat, QColor, QFont, QTextCursor
 from core.theme import TERMINAL_BG, TERMINAL_FG, TERMINAL_ACCENT, PALETTE
+from core.log_clean import LogCleaner
 from core.terminal_highlight import FORMATS as HIGHLIGHT_FORMATS, highlight_spans
 
 if TYPE_CHECKING:
@@ -46,6 +47,7 @@ class TerminalSession:
     log_enabled: bool = False
     log_paused: bool = False
     log_file: object | None = None
+    log_cleaner: LogCleaner = field(default_factory=LogCleaner)
     recv_buffer: str = ""
     recv_condition: threading.Condition = field(default_factory=threading.Condition)
     cols: int = DEFAULT_COLS
@@ -132,6 +134,9 @@ class TerminalSession:
             self.stream.feed(data)
         except Exception:
             pass
+        plugins = getattr(self.app, "plugins", None)
+        if plugins is not None and getattr(plugins, "output_hooks", None):
+            plugins.dispatch_output(self, data)
         with self.recv_condition:
             self.recv_buffer += data
             if len(self.recv_buffer) > 250_000:
@@ -139,8 +144,10 @@ class TerminalSession:
             self.recv_condition.notify_all()
         if self.log_enabled and not self.log_paused and self.log_file:
             try:
-                self.log_file.write(data)
-                self.log_file.flush()
+                text = self.log_cleaner.feed(data)
+                if text:
+                    self.log_file.write(text)
+                    self.log_file.flush()
             except Exception:
                 pass
 
@@ -269,10 +276,8 @@ class TerminalSession:
                 self.connection_lost_notified = True
             return
         try:
+            # What is typed is echoed back by the remote side and logged from there.
             self.connection.send(data)
-            if self.log_enabled and not self.log_paused and self.log_file:
-                self.log_file.write(data)
-                self.log_file.flush()
         except Exception as exc:
             self.incoming.put(f"\r\n[Send error: {exc}]\r\n")
             try:
@@ -390,6 +395,7 @@ class TerminalSession:
             return
         file_path.parent.mkdir(parents=True, exist_ok=True)
         self.log_file = file_path.open("a", encoding="utf-8", errors="replace")
+        self.log_cleaner = LogCleaner()
         self.log_enabled = True
         self.log_paused = False
 
@@ -416,6 +422,12 @@ class TerminalSession:
         self.log_paused = False
         try:
             if self.log_file:
+                try:
+                    tail = self.log_cleaner.flush()
+                    if tail:
+                        self.log_file.write(tail)
+                except Exception:
+                    pass
                 self.log_file.close()
         finally:
             self.log_file = None

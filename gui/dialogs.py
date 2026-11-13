@@ -3,6 +3,7 @@ import os
 import re
 import threading
 import webbrowser
+from gui.helpers import mono_font
 from pathlib import Path
 
 import serial.tools.list_ports
@@ -429,7 +430,7 @@ class OperatorGateDialog(QDialog):
         box.setFixedHeight(100)
         box.setReadOnly(True)
         box.setStyleSheet("background-color: #0b131c; color: #d8f3dc;")  # intentionally terminal-styled, matches the live terminal viewport
-        box.setFont(QFont("Consolas", 11))
+        box.setFont(mono_font(11))
         box.setPlainText(tail_log if tail_log.strip() else "[No recent terminal output]")
         root.addWidget(box)
 

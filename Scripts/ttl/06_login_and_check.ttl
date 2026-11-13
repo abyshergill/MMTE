@@ -1,0 +1,15 @@
+; Telnet login, run two commands, then leave.
+; Replace the CHANGE_ME values first.
+
+connect '192.168.1.10 /telnet'
+wait 'login:'
+sendln 'CHANGE_ME_USER'
+wait 'Password:'
+sendln 'CHANGE_ME_PASSWORD'
+wait '$'
+sendln 'uname -a'
+pause 1
+sendln 'uptime'
+pause 1
+sendln 'exit'
+end

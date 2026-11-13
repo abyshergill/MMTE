@@ -1,0 +1,14 @@
+; Run a list of commands one after another with a short pause.
+; Use this as a template: copy a pair of lines for each command.
+
+cmd1 = 'df -h'
+cmd2 = 'free -m'
+cmd3 = 'ip addr'
+
+sendln cmd1
+mpause 800
+sendln cmd2
+mpause 800
+sendln cmd3
+pause 1
+end

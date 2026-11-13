@@ -3,6 +3,7 @@ import re
 import sys
 import threading
 import time
+from gui.helpers import mono_font
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
@@ -76,10 +77,8 @@ class PlaylistSupervisorThread(QThread):
                     break
 
             self.select_session_requested.emit(sess)
-            sess.incoming.put(f"\r\n[═══ PLAYLIST STEP ({idx + 1}/{len(self.playlist)}) ═══]\r\n")
             item.status = "Running"
             self._push_ui()
-            sess.incoming.put(f"[Playlist ➔] Executing: {Path(item.path).name}\n")
 
             sess.start_script(Path(item.path).name)
             start_marker, code_failed, error_reason = len(sess.recv_buffer), False, ""
@@ -117,7 +116,6 @@ class PlaylistSupervisorThread(QThread):
                     if detected:
                         passed, item.status = True, "Passed"
                         self._push_ui()
-                        sess.incoming.put(f"[Playlist ✔] Hand-off verified for {Path(item.path).name}\n")
                         break
                     else:
                         choice = self._spawn_gate(sess, item, f"Deadline expired ({current_timeout}s) without prompt.", start_marker)
@@ -334,7 +332,7 @@ class MultiScriptDialog(QDialog):
             row_layout.addWidget(idx_lbl, 0, 0)
 
             name_lbl = QLabel(Path(item.path).name)
-            name_lbl.setFont(QFont("Consolas"))
+            name_lbl.setFont(mono_font())
             name_lbl.setToolTip(item.path)
             row_layout.addWidget(name_lbl, 0, 1)
             row_layout.setColumnStretch(1, 1)

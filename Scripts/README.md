@@ -27,3 +27,6 @@ Run scripts through the application's Run Script or Multi-Script features.
 ## Note :
 Replace CHANGE_ME values before using connection examples. 
 
+
+## Plugins:
+Functions added by plugins (see `plugins/example_hello.py` and the README) are available in Python scripts too.
