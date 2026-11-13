@@ -55,12 +55,15 @@ impl Settings {
     pub fn get_bool(&self, key: &str, default: bool) -> bool {
         self.data.get(key).and_then(|v| v.as_bool()).unwrap_or(default)
     }
+    #[allow(dead_code)]
     pub fn get_f64(&self, key: &str, default: f64) -> f64 {
         self.data.get(key).and_then(|v| v.as_f64()).unwrap_or(default)
     }
+    #[allow(dead_code)]
     pub fn get_str(&self, key: &str) -> Option<String> {
         self.data.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
     }
+    #[allow(dead_code)]
     pub fn get(&self, key: &str) -> Option<&Value> {
         self.data.get(key)
     }

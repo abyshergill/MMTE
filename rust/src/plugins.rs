@@ -16,7 +16,9 @@ pub struct PluginInfo {
     pub loaded: bool,
     pub error: String,
     pub actions: Vec<(String, Option<String>)>,
+    #[allow(dead_code)]
     pub functions: Vec<String>,
+    pub hooks: usize,
 }
 
 pub const TEMPLATE: &str = r#""""My plugin - describe what it does here."""
@@ -86,6 +88,7 @@ pub fn load(hub: &Arc<Hub>, dirs: &[PathBuf]) -> Vec<PluginInfo> {
             loaded: p["loaded"].as_bool().unwrap_or(false),
             error: p["error"].as_str().unwrap_or("").into(),
             actions: p["actions"].as_array().map(|a| a.iter().map(|x| (x["text"].as_str().unwrap_or("").to_string(), x["shortcut"].as_str().map(|s| s.to_string()))).collect()).unwrap_or_default(),
+            hooks: p["hooks"].as_u64().unwrap_or(0) as usize,
             functions: p["functions"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect()).unwrap_or_default(),
         })
         .collect()
@@ -95,6 +98,85 @@ pub fn load(hub: &Arc<Hub>, dirs: &[PathBuf]) -> Vec<PluginInfo> {
 pub fn run_action(hub: &Arc<Hub>, session: Arc<Session>, dirs: &[PathBuf], plugin: &PluginInfo, index: usize) -> Result<(), String> {
     let host = ScriptHost::new(hub.clone(), session, dirs.to_vec());
     host.run_python(&["action", &plugin.path.to_string_lossy(), &index.to_string()]).map_err(|e| e.to_string())
+}
+
+/// Background Python process that feeds terminal output to plugins' `on_output` hooks.
+pub struct HookDaemon {
+    child: Arc<parking_lot::Mutex<std::process::Child>>,
+    stdin: Arc<parking_lot::Mutex<std::process::ChildStdin>>,
+}
+
+impl HookDaemon {
+    pub fn start(hub: &Arc<Hub>, dirs: &[PathBuf]) -> Option<Self> {
+        use std::io::{BufRead, BufReader, Write};
+        use std::process::{Command, Stdio};
+        let py = crate::script::find_python()?;
+        let prelude = crate::script::prelude_path().ok()?;
+        let mut child = Command::new(py)
+            .arg("-u")
+            .arg(&prelude)
+            .arg("hooks")
+            .env("MMTE_PLUGIN_DIRS", std::env::join_paths(dirs).unwrap_or_default())
+            .env("PYTHONIOENCODING", "utf-8")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .ok()?;
+        let stdin = Arc::new(parking_lot::Mutex::new(child.stdin.take()?));
+        let stdout = child.stdout.take()?;
+        let host = Arc::new(ScriptHost::new(hub.clone(), hub.active_session().unwrap_or_else(|| Session::new(0, "plugins", false)), dirs.to_vec()));
+        let (tx, rx) = crossbeam_channel::bounded::<crate::session::OutputEvent>(2000);
+        // reader: answers the plugin's requests (send, status, ...)
+        {
+            let (host, hub, stdin, tx) = (host.clone(), hub.clone(), stdin.clone(), tx.clone());
+            std::thread::spawn(move || {
+                for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                    let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
+                    let op = v["op"].as_str().unwrap_or("").to_string();
+                    if op == "hooks_ready" {
+                        if v["count"].as_u64().unwrap_or(0) > 0 {
+                            crate::session::set_output_hook(Some(tx.clone()));
+                        }
+                        continue;
+                    }
+                    if op == "error" || op == "result" {
+                        continue;
+                    }
+                    if let Some(s) = hub.active_session() {
+                        host.set_cur(s);
+                    }
+                    let reply = host.handle_op(&op, &v, std::path::Path::new("."));
+                    let mut w = stdin.lock();
+                    if writeln!(w, "{reply}").and_then(|_| w.flush()).is_err() {
+                        break;
+                    }
+                }
+                crate::session::set_output_hook(None);
+            });
+        }
+        // forwarder: terminal output -> plugin
+        {
+            let stdin = stdin.clone();
+            std::thread::spawn(move || {
+                while let Ok((session, label, connected, text)) = rx.recv() {
+                    let ev = serde_json::json!({"event": "output", "session": session, "label": label, "connected": connected, "text": text});
+                    let mut w = stdin.lock();
+                    if writeln!(w, "{ev}").and_then(|_| w.flush()).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        Some(Self { child: Arc::new(parking_lot::Mutex::new(child)), stdin })
+    }
+
+    pub fn stop(&self) {
+        use std::io::Write;
+        crate::session::set_output_hook(None);
+        let _ = writeln!(self.stdin.lock(), "{{\"event\": \"quit\"}}");
+        let _ = self.child.lock().kill();
+    }
 }
 
 pub fn create_from_template(name: &str) -> Result<PathBuf, String> {
@@ -136,6 +218,31 @@ mod tests {
         let s = hub.new_session(None);
         run_action(&hub, s, &[dir.clone()], good, 0).unwrap();
         assert_eq!(hub.status.lock().as_str(), "x");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn output_hooks_receive_terminal_text() {
+        if crate::script::find_python().is_none() {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("mmte_hook_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("watch.py"), "def register(api):\n    def on_text(session, text):\n        if 'ALARM-7' in text:\n            api.status('alarm on ' + session.name)\n    api.on_output(on_text)\n").unwrap();
+        let (hub, _rx) = Hub::new();
+        let s = hub.new_session(Some("Rack 1"));
+        let daemon = HookDaemon::start(&hub, &[dir.clone()]).expect("daemon");
+        let mut ok = false;
+        for _ in 0..80 {
+            s.local("temperature ALARM-7 raised\r\n");
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            if hub.status.lock().contains("alarm on Rack 1") {
+                ok = true;
+                break;
+            }
+        }
+        daemon.stop();
+        assert!(ok, "status was {:?}", hub.status.lock());
         let _ = std::fs::remove_dir_all(dir);
     }
 

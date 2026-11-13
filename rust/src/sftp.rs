@@ -189,6 +189,7 @@ impl SftpClient {
         Ok(out)
     }
 
+    #[allow(dead_code)]
     pub fn is_dir(&self, path: &str) -> bool {
         self.sftp().stat(Path::new(path)).map(|s| s.is_dir()).unwrap_or(false)
     }
@@ -201,6 +202,7 @@ impl SftpClient {
         self.sftp().mkdir(Path::new(path), 0o755).map_err(|e| e.to_string())
     }
 
+    #[allow(dead_code)]
     pub fn rename(&self, from: &str, to: &str) -> Result<(), String> {
         self.sftp().rename(Path::new(from), Path::new(to), None).map_err(|e| e.to_string())
     }

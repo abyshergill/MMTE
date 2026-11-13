@@ -701,7 +701,7 @@ impl super::app::App {
                                 let color = match st.as_str() {
                                     "Pending" => theme::MUTE,
                                     "Running" => egui::Color32::from_rgb(0xff, 0xd5, 0x4f),
-                                    "Passed" | "Passed" => theme::TERM_ACCENT,
+                                    "Passed" => theme::TERM_ACCENT,
                                     s if s.starts_with("GATE") => egui::Color32::from_rgb(0xff, 0x57, 0x22),
                                     _ => theme::DIM,
                                 };

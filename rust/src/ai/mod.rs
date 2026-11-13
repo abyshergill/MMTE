@@ -20,6 +20,7 @@ pub struct ProviderSpec {
     pub endpoint: &'static str,
     pub model: &'static str,
     pub key_env: &'static str,
+    #[allow(dead_code)]
     pub needs_key: bool,
     pub local: bool,
 }

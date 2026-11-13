@@ -176,7 +176,7 @@ fn http_error(status: u16, body: &str) -> LlmError {
     err(if detail.is_empty() { format!("HTTP {status}") } else { format!("HTTP {status}: {detail}") }, hint)
 }
 
-fn client(cfg: &Config) -> Result<reqwest::blocking::Client, LlmError> {
+fn client() -> Result<reqwest::blocking::Client, LlmError> {
     reqwest::blocking::Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(3600))
@@ -186,7 +186,7 @@ fn client(cfg: &Config) -> Result<reqwest::blocking::Client, LlmError> {
 
 /// POST and stream the response body line by line. Calls `on_line` for every non-empty line.
 fn post_lines(url: &str, payload: &Value, headers: &[(&str, String)], cfg: &Config, cancel: &Arc<AtomicBool>, mut on_line: impl FnMut(&str) -> Result<(), LlmError>) -> Result<(), LlmError> {
-    let client = client(cfg)?;
+    let client = client()?;
     let mut attempt = 0;
     let resp = loop {
         let mut rb = client.post(url).json(payload);
@@ -427,7 +427,7 @@ pub fn stream(cfg: &Config, messages: &[Value], tools: Option<&[Value]>, cancel:
 /// Model names offered by the provider (for the settings dialog).
 pub fn list_models(cfg: &Config) -> Result<Vec<String>, LlmError> {
     let spec = resolve_provider(cfg);
-    let c = client(cfg)?;
+    let c = client()?;
     let get = |url: String, headers: Vec<(&str, String)>| -> Result<Value, LlmError> {
         let mut rb = c.get(&url).timeout(Duration::from_secs(10));
         for (k, v) in headers {

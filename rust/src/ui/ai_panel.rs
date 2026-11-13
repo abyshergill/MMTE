@@ -345,7 +345,7 @@ impl AiPanel {
         if !self.open {
             return;
         }
-        egui::Panel::right("ai_panel").default_size(420.0).min_size(320.0).resizable(true).frame(egui::Frame::default().fill(theme::BG1).inner_margin(egui::Margin::same(12))).show_inside(ui, |ui| {
+        egui::Panel::right("ai_panel").default_size(420.0).min_size(320.0).resizable(true).frame(egui::Frame::default().fill(theme::BG1).inner_margin(egui::Margin::same(12))).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("AI TEST ENGINEER").strong().size(14.0));
                 let (txt, col) = if self.auto_mode { ("AUTO-RUN", theme::ERR) } else { ("ASK FIRST", theme::WARN) };

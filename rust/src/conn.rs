@@ -1,7 +1,7 @@
 //! SSH / Telnet / Serial connections. Each connection runs one worker thread that reads
 //! incoming bytes (handed to a callback) and writes whatever arrives on the command channel.
 
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{unbounded, Sender};
 use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};

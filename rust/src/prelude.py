@@ -12,14 +12,22 @@ class _Stopped(BaseException):
     """The user stopped the script."""
 
 
+_events = []
+
+
 def _rpc(op, **args):
     args["op"] = op
     _out.write(json.dumps(args) + "\n")
     _out.flush()
-    line = _in.readline()
-    if not line:
-        raise _Stopped()
-    reply = json.loads(line)
+    while True:
+        line = _in.readline()
+        if not line:
+            raise _Stopped()
+        reply = json.loads(line)
+        if "event" in reply:  # output events can arrive while a call waits for its reply
+            _events.append(reply)
+            continue
+        break
     if reply.get("ok"):
         return reply.get("value")
     err = reply.get("error", "error")
@@ -257,6 +265,32 @@ def _main():
         _out.write(json.dumps({"op": "result", "value": listing}) + "\n")
         _out.flush()
         return 0
+    if mode == "hooks":
+        reg = load_plugins(_plugin_dirs())
+        hooks = [(p["name"], h) for p in reg["plugins"] if p["loaded"] for h in p["hooks"]]
+        _out.write(json.dumps({"op": "hooks_ready", "count": len(hooks)}) + "\n")
+        _out.flush()
+        while True:
+            if _events:
+                ev = _events.pop(0)
+            else:
+                line = _in.readline()
+                if not line:
+                    return 0
+                ev = json.loads(line)
+                if "event" not in ev:
+                    continue
+            if ev["event"] == "quit":
+                return 0
+            if ev["event"] == "output":
+                proxy = _SessionProxy({"name": ev.get("session", ""), "label": ev.get("label", ""), "connected": ev.get("connected", False)})
+                for name, cb in hooks:
+                    try:
+                        cb(proxy, ev.get("text", ""))
+                    except _Stopped:
+                        return 0
+                    except Exception as exc:
+                        _rpc("status", text="Plugin %s output hook failed: %s" % (name, exc))
     if mode == "action":
         reg = load_plugins(_plugin_dirs())
         path, index = sys.argv[2], int(sys.argv[3])

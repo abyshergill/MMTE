@@ -22,6 +22,14 @@ pub const SCROLLBACK: usize = 5000;
 
 static REPAINT: OnceCell<eframe::egui::Context> = OnceCell::new();
 
+/// Terminal output events for plugin `on_output` hooks: (session name, label, connected, text).
+pub type OutputEvent = (String, String, bool, String);
+static OUTPUT_HOOK: parking_lot::Mutex<Option<crossbeam_channel::Sender<OutputEvent>>> = parking_lot::Mutex::new(None);
+
+pub fn set_output_hook(tx: Option<crossbeam_channel::Sender<OutputEvent>>) {
+    *OUTPUT_HOOK.lock() = tx;
+}
+
 pub fn set_repaint_context(ctx: eframe::egui::Context) {
     let _ = REPAINT.set(ctx);
 }
@@ -219,6 +227,9 @@ impl Session {
         if text.is_empty() {
             return;
         }
+        if let Some(tx) = OUTPUT_HOOK.lock().as_ref() {
+            let _ = tx.try_send((self.name(), self.label(), self.is_connected(), text.to_string()));
+        }
         {
             let mut b = self.buf.lock();
             b.push_str(text);
@@ -409,6 +420,7 @@ impl Session {
         request_repaint();
     }
 
+    #[allow(dead_code)]
     pub fn clear_wait_buffer(&self) {
         self.buf.lock().clear();
     }

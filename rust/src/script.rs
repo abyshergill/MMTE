@@ -71,7 +71,7 @@ pub fn find_python() -> Option<String> {
     .clone()
 }
 
-fn prelude_path() -> Result<PathBuf, String> {
+pub fn prelude_path() -> Result<PathBuf, String> {
     let dir = std::env::temp_dir().join(format!("mmte_bridge_{}", std::process::id()));
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let p = dir.join("prelude.py");
@@ -247,11 +247,7 @@ impl ScriptHost {
                         *self.result.lock() = Some(v["value"].clone());
                         continue;
                     }
-                    let reply = match self.op(&op, &v, &base) {
-                        Ok(val) => json!({"ok": true, "value": val}),
-                        Err(OpErr::Stopped) => json!({"ok": false, "error": "__stopped__"}),
-                        Err(OpErr::Msg(m)) => json!({"ok": false, "error": m}),
-                    };
+                    let reply = self.handle_op(&op, &v, &base);
                     if writeln!(stdin, "{reply}").and_then(|_| stdin.flush()).is_err() {
                         break Ok(());
                     }
@@ -292,6 +288,19 @@ impl ScriptHost {
                 Err(ScriptError::Failed(last))
             }
         }
+    }
+
+    /// Run one script operation and build the JSON reply for the Python side.
+    pub fn handle_op(&self, op: &str, v: &Value, base: &Path) -> Value {
+        match self.op(op, v, base) {
+            Ok(val) => json!({"ok": true, "value": val}),
+            Err(OpErr::Stopped) => json!({"ok": false, "error": "__stopped__"}),
+            Err(OpErr::Msg(m)) => json!({"ok": false, "error": m}),
+        }
+    }
+
+    pub fn set_cur(&self, s: Arc<Session>) {
+        *self.cur.lock() = s;
     }
 
     fn target(&self, v: &Value) -> Option<Arc<Session>> {

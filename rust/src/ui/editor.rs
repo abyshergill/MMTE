@@ -477,13 +477,13 @@ impl Editor {
                 }
             }
             self.shortcuts(&ctx);
-            egui::Panel::top("ed_menu").show_inside(ui, |ui| self.menu(ui));
-            egui::Panel::bottom("ed_status").show_inside(ui, |ui| self.status_bar(ui));
-            egui::Panel::top("ed_tabs").show_inside(ui, |ui| self.tabs(ui));
+            egui::Panel::top("ed_menu").show(ui, |ui| self.menu(ui));
+            egui::Panel::bottom("ed_status").show(ui, |ui| self.status_bar(ui));
+            egui::Panel::top("ed_tabs").show(ui, |ui| self.tabs(ui));
             if self.find.open {
-                egui::Panel::top("ed_find").show_inside(ui, |ui| self.find_bar(ui));
+                egui::Panel::top("ed_find").show(ui, |ui| self.find_bar(ui));
             }
-            egui::CentralPanel::default().frame(egui::Frame::default().fill(theme::BG0)).show_inside(ui, |ui| {
+            egui::CentralPanel::default().frame(egui::Frame::default().fill(theme::BG0)).show(ui, |ui| {
                 if self.docs.is_empty() {
                     ui.centered_and_justified(|ui| {
                         ui.label(RichText::new("No document open - File > New or Open").color(theme::MUTE));
@@ -590,7 +590,7 @@ impl Editor {
     }
 
     fn editor_id(&self) -> egui::Id {
-        egui::Id::new(("ed_text", self.docs.get(self.active).map(|d| d.id).unwrap_or(0)))
+        egui::Id::unique(("ed_text", self.docs.get(self.active).map(|d| d.id).unwrap_or(0)))
     }
 
     fn open_dialog(&mut self) {

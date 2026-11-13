@@ -17,6 +17,7 @@ use parking_lot::Mutex;
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+#[cfg(test)]
 use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -559,10 +560,6 @@ pub fn run_commands_and_summarize(shared: &Shared, cfg: &Config, history: &[Valu
         return;
     }
     summarize_action(cfg, history, &title, &output, cancel, tx, &finish);
-}
-
-pub fn sleep_ms(ms: u64) {
-    std::thread::sleep(Duration::from_millis(ms));
 }
 
 #[cfg(test)]

@@ -17,6 +17,7 @@ pub struct TermUi {
 
 pub struct TermResponse {
     pub response: egui::Response,
+    #[allow(dead_code)]
     pub rect: Rect,
 }
 
@@ -195,7 +196,7 @@ pub fn show(ui: &mut egui::Ui, session: &Arc<Session>, tui: &mut TermUi, id: egu
         let mut run = String::new();
         let mut run_start = 0u16;
         let mut run_style: Option<(Color32, bool)> = None; // (fg, underline)
-        let mut flush = |run: &mut String, start: u16, style: Option<(Color32, bool)>, painter: &egui::Painter| {
+        let flush = |run: &mut String, start: u16, style: Option<(Color32, bool)>, painter: &egui::Painter| {
             if let Some((fg, ul)) = style {
                 if !run.trim().is_empty() || ul {
                     let x = tui.origin.x + start as f32 * cell.x;

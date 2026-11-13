@@ -28,6 +28,7 @@ pub struct App {
     pub sidebar: bool,
     pub inline_rename: Option<(u64, String, bool)>,
     pub extras: super::windows::Extras,
+    hook_daemon: Option<plugins::HookDaemon>,
     pub shot: Option<(PathBuf, u32)>,
 }
 
@@ -62,6 +63,7 @@ impl App {
             sidebar: true,
             inline_rename: None,
             extras: super::windows::Extras::new(hub),
+            hook_daemon: None,
             shot: std::env::var("MMTE_SCREENSHOT").ok().map(|p| (PathBuf::from(p), 0)),
         };
         app.reload_plugins();
@@ -590,8 +592,15 @@ impl App {
         }
         if let Some(rx) = &self.extras.plugin_rx {
             if let Ok(list) = rx.try_recv() {
+                let any_hooks = list.iter().any(|p| p.loaded && p.hooks > 0);
                 self.plugins = list;
                 self.extras.plugin_rx = None;
+                if let Some(d) = self.hook_daemon.take() {
+                    d.stop();
+                }
+                if any_hooks {
+                    self.hook_daemon = plugins::HookDaemon::start(&self.hub, &self.plugin_dirs);
+                }
             }
         }
     }
@@ -978,16 +987,16 @@ impl eframe::App for App {
             self.sidebar = !self.sidebar;
         }
 
-        egui::Panel::top("menu").show_inside(ui, |ui| {
+        egui::Panel::top("menu").show(ui, |ui| {
             self.menu_bar(ui);
         });
-        egui::Panel::bottom("status").show_inside(ui, |ui| {
+        egui::Panel::bottom("status").show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(self.hub.status.lock().clone()).color(theme::DIM).size(12.5));
             });
         });
         if self.sidebar {
-            egui::Panel::left("sidebar").exact_size(245.0).resizable(false).frame(egui::Frame::default().fill(theme::BG1).inner_margin(egui::Margin::symmetric(14, 10))).show_inside(ui, |ui| {
+            egui::Panel::left("sidebar").exact_size(245.0).resizable(false).frame(egui::Frame::default().fill(theme::BG1).inner_margin(egui::Margin::symmetric(14, 10))).show(ui, |ui| {
                 self.sidebar_ui(ui);
             });
         }
@@ -995,7 +1004,7 @@ impl eframe::App for App {
         self.extras.right_panel(ui, &self.hub);
 
         let cur = self.current();
-        egui::CentralPanel::default().frame(egui::Frame::default().fill(theme::TERM_BG).inner_margin(egui::Margin::symmetric(12, 8))).show_inside(ui, |ui| {
+        egui::CentralPanel::default().frame(egui::Frame::default().fill(theme::TERM_BG).inner_margin(egui::Margin::symmetric(12, 8))).show(ui, |ui| {
             ui.horizontal(|ui| {
                 if !self.sidebar && ui.add_sized([28.0, 28.0], egui::Button::new("\u{00BB}")).on_hover_text("Show the sidebar (Ctrl+B)").clicked() {
                     self.sidebar = true;
@@ -1020,7 +1029,7 @@ impl eframe::App for App {
             self.tab_bar(ui);
             ui.add_space(2.0);
             if let Some(s) = cur.clone() {
-                let id = egui::Id::new(("term", s.id));
+                let id = egui::Id::unique(("term", s.id));
                 let tui = self.tuis.entry(s.id).or_default();
                 let resp = term_view::show(ui, &s, tui, id);
                 let r = &resp.response;

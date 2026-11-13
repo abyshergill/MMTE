@@ -85,7 +85,7 @@ pub fn highlight_spans(line: &str) -> Vec<(usize, usize, Tag)> {
     byte_to_col[line.len()] = ncols;
     let mut taken = vec![false; ncols];
     let mut spans = Vec::new();
-    let mut claim = |s: usize, e: usize, tag: Tag, taken: &mut Vec<bool>, spans: &mut Vec<(usize, usize, Tag)>| {
+    let claim = |s: usize, e: usize, tag: Tag, taken: &mut Vec<bool>, spans: &mut Vec<(usize, usize, Tag)>| {
         let (s, e) = (byte_to_col[s], byte_to_col[e]);
         if s >= e || taken[s..e].iter().any(|t| *t) {
             return;
