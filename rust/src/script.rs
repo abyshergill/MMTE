@@ -582,6 +582,63 @@ mod tests {
     }
 
     #[test]
+    fn shipped_example_scripts_run() {
+        use std::io::{Read, Write};
+        if find_python().is_none() {
+            return;
+        }
+        // device that answers every received line with a prompt
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let Ok((mut sock, _)) = listener.accept() else { return };
+            let _ = sock.write_all(b"switch# ");
+            let mut buf = [0u8; 256];
+            while let Ok(n) = sock.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                let _ = sock.write_all(b"ok\r\nswitch# ");
+            }
+        });
+        let (hub, _rx) = Hub::new();
+        let s = hub.new_session(Some("Terminal 1"));
+        s.connect(ConnSpec::Telnet { host: "127.0.0.1".into(), port }).unwrap();
+        let work = std::env::temp_dir().join(format!("mmte_examples_{}", std::process::id()));
+        std::fs::create_dir_all(&work).unwrap();
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../Scripts");
+        let host = ScriptHost::new(hub.clone(), s.clone(), vec![]);
+        for rel in ["python/01_basics.py", "python/02_send_options.py", "python/06_wait_and_sleep.py", "python/07_logging.py", "python/10_terminal_management.py", "ttl/01_basics.ttl", "ttl/04_timing_and_comments.ttl", "ttl/08_repeat_commands.ttl"] {
+            let from = src.join(rel);
+            if !from.exists() {
+                continue;
+            }
+            let to = work.join(from.file_name().unwrap());
+            std::fs::copy(&from, &to).unwrap();
+            host.set_cur(s.clone());
+            let r = host.run_file(&to);
+            assert!(r.is_ok(), "{rel}: {r:?}");
+        }
+        assert!(s.buf.lock().contains("Script started on Terminal 1"));
+        assert!(work.join("logs/diagnostic.log").exists());
+        s.close();
+        let _ = std::fs::remove_dir_all(work);
+    }
+
+    #[test]
+    fn every_python_example_compiles() {
+        let Some(py) = find_python() else { return };
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../Scripts/python");
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let p = entry.path();
+            if p.extension().map(|e| e == "py").unwrap_or(false) {
+                let ok = std::process::Command::new(&py).args(["-c", "import sys; compile(open(sys.argv[1]).read(), sys.argv[1], 'exec')"]).arg(&p).status().unwrap().success();
+                assert!(ok, "{} does not compile", p.display());
+            }
+        }
+    }
+
+    #[test]
     fn python_error_is_reported() {
         if find_python().is_none() {
             return;

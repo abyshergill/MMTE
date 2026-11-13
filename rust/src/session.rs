@@ -53,8 +53,31 @@ fn nz(v: u16) -> NonZeroU16 {
     NonZeroU16::new(v.max(1)).unwrap()
 }
 
+/// Answers terminal queries that need a reply (cursor position, device attributes ...).
+#[derive(Default)]
+pub struct TermCallbacks {
+    pub replies: Vec<u8>,
+}
+
+impl vt100::Callbacks for TermCallbacks {
+    fn unhandled_csi(&mut self, screen: &mut vt100::Screen, i1: Option<u8>, _i2: Option<u8>, params: &[&[u16]], c: char) {
+        let first = params.first().and_then(|p| p.first()).copied().unwrap_or(0);
+        match (c, i1) {
+            // DSR 6: cursor position report. Devices send ESC[999;999H ESC[6n to learn the window size.
+            ('n', None) if first == 6 => {
+                let (r, c) = screen.cursor_position();
+                self.replies.extend_from_slice(format!("\x1b[{};{}R", r + 1, c + 1).as_bytes());
+            }
+            ('n', None) if first == 5 => self.replies.extend_from_slice(b"\x1b[0n"),
+            ('c', None) if first == 0 => self.replies.extend_from_slice(b"\x1b[?1;2c"),
+            ('c', Some(b'>')) => self.replies.extend_from_slice(b"\x1b[>0;0;0c"),
+            _ => {}
+        }
+    }
+}
+
 pub struct TermState {
-    pub parser: vt100::Parser,
+    pub parser: vt100::Parser<TermCallbacks>,
     pub scroll: usize,
     pub cols: u16,
     pub rows: u16,
@@ -63,7 +86,7 @@ pub struct TermState {
 
 impl TermState {
     fn new(cols: u16, rows: u16) -> Self {
-        Self { parser: vt100::Parser::new(nz(rows), nz(cols), SCROLLBACK), scroll: 0, cols, rows, highlight: true }
+        Self { parser: vt100::Parser::new_with_callbacks(nz(rows), nz(cols), SCROLLBACK, TermCallbacks::default()), scroll: 0, cols, rows, highlight: true }
     }
     pub fn alt_screen(&self) -> bool {
         self.parser.screen().alternate_screen()
@@ -189,8 +212,13 @@ impl Session {
         if data.is_empty() {
             return;
         }
-        {
-            self.term.lock().parser.process(data);
+        let replies = {
+            let mut t = self.term.lock();
+            t.parser.process(data);
+            std::mem::take(&mut t.parser.callbacks_mut().replies)
+        };
+        if !replies.is_empty() {
+            self.send_bytes(&replies);
         }
         let text = {
             let mut pend = self.utf8_pending.lock();
@@ -213,7 +241,11 @@ impl Session {
 
     /// A message produced by this application (shown in the terminal and in the wait buffer).
     pub fn local(&self, text: &str) {
-        self.term.lock().parser.process(text.as_bytes());
+        {
+            let mut t = self.term.lock();
+            t.parser.process(text.as_bytes());
+            t.parser.callbacks_mut().replies.clear(); // local text never asks the remote anything
+        }
         self.after_text(text);
     }
 
@@ -764,6 +796,48 @@ mod tests {
         let text = std::fs::read_to_string(&path).unwrap();
         assert_eq!(text, "hello\n");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn answers_cursor_position_and_device_queries() {
+        use std::io::Read;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let got = Arc::new(Mutex::new(Vec::new()));
+        let got2 = got.clone();
+        std::thread::spawn(move || {
+            let (mut sock, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 64];
+            while let Ok(n) = sock.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                got2.lock().extend_from_slice(&buf[..n]);
+            }
+        });
+        let s = Session::new(1, "t", true);
+        s.connect(ConnSpec::Telnet { host: "127.0.0.1".into(), port }).unwrap();
+        // what the Zephyr shell in the issue report sends to learn the window size
+        s.ingest(b"\x1b7\x1b[r\x1b[999;999H\x1b[6n\x1b8");
+        s.ingest(b"\x1b[c");
+        for _ in 0..50 {
+            if got.lock().len() >= 13 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let text = String::from_utf8_lossy(&got.lock()).to_string();
+        assert!(text.contains("\x1b[24;80R"), "{text:?}");
+        assert!(text.contains("\x1b[?1;2c"), "{text:?}");
+        // local messages never trigger replies
+        s.local("\x1b[6n");
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(text.matches("R").count(), got_count_r(&got.lock()));
+        s.close();
+    }
+
+    fn got_count_r(b: &[u8]) -> usize {
+        String::from_utf8_lossy(b).matches('R').count()
     }
 
     #[test]

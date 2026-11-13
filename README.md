@@ -23,6 +23,15 @@ Network SREs and hardware developers are constantly forced to choose between **w
 
 ---
 
+## 🦀 Rust edition
+
+A complete native rewrite lives in [`rust/`](rust/README.md) (egui / eframe, no Python needed except to run
+`.py` scripts and plugins). Start it with `rust/run.sh` (macOS / Linux) or `rust/run_windows.bat`.
+It keeps SSH / Telnet / Serial terminals, TTL and Python scripting, macros, logging, SFTP with jump hops,
+the text editor, the Multi-Script Suite, plugins and the AI assistant, and reads the same settings folder.
+
+---
+
 ## 🆕 What's New
 
 * **Python plugins.** Drop a `.py` file in `plugins/` (or `~/.modern_multi_terminal_emulator/plugins`) with a `register(api)` function. Plugins can add menu items under **Plugins**, add functions to Python scripts and react to terminal output. **Plugins → New Plugin from Template** creates a starter file. See `plugins/example_hello.py`.
