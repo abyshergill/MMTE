@@ -13,7 +13,7 @@ from time import monotonic as time_monotonic
 from pathlib import Path
 
 from PyQt6.QtCore import QSize, Qt, QTimer
-from PyQt6.QtGui import QFont, QIcon
+from PyQt6.QtGui import QFont, QFontMetricsF, QIcon
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -471,16 +471,18 @@ class TerminalApp(QMainWindow):
 
     def compute_terminal_size(self, session: TerminalSession) -> tuple[int, int]:
         text_widget = session.terminal
-        fm = text_widget.fontMetrics()
-        char_width = max(fm.horizontalAdvance("0"), 1)
-        line_height = max(fm.lineSpacing(), 1)
+        # Measure with fractional precision: a glyph is often e.g. 7.8 px wide, and rounding that
+        # down to 7 made every row longer than the view, so text ran past the right edge.
+        fm = QFontMetricsF(text_widget.font())
+        char_width = max(fm.horizontalAdvance("0" * 100) / 100.0, 1.0)
+        line_height = max(fm.lineSpacing(), 1.0)
 
         padding_px = 14
         widget_width = max(text_widget.viewport().width() - padding_px, char_width)
         widget_height = max(text_widget.viewport().height() - padding_px, line_height)
 
-        cols = max(min(widget_width // char_width, 200), 20)
-        rows = max(min(widget_height // line_height, 80), 5)
+        cols = max(min(int(widget_width // char_width), 300), 20)
+        rows = max(min(int(widget_height // line_height), 120), 5)
         return cols, rows
 
     def on_terminal_resize(self, session: TerminalSession):
@@ -495,7 +497,7 @@ class TerminalApp(QMainWindow):
             return
         try:
             cols, rows = self.compute_terminal_size(session)
-            session.resize(cols, rows)
+            session.resize(cols, rows)  # also announces the size to the remote side if needed
         except Exception:
             pass
 
@@ -813,6 +815,14 @@ class TerminalApp(QMainWindow):
         if s.connection:
             s.close()
         s.connecting = True
+        s.remote_size = None
+        try:
+            # open the remote terminal at the size actually shown
+            cols, rows = self.compute_terminal_size(s)
+            s.resize(cols, rows)
+        except Exception:
+            pass
+        conn.initial_size = (s.cols, s.rows)
 
         def worker():
             try:
@@ -824,6 +834,7 @@ class TerminalApp(QMainWindow):
                 # let keystrokes typed during the handshake hit a half-open channel,
                 # raise, and tear the brand-new connection down.
                 s.connection = conn
+                s.remote_size = (s.cols, s.rows) if getattr(conn, "label", "") == "SSH" else None
                 s.connected_label = label
                 s.connection_lost_notified = False
                 s.incoming.put(f"\r\n[Active: {label}]\r\n")

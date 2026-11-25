@@ -15,7 +15,7 @@ def _utf8_decoder():
 
 # Telnet protocol bytes (RFC 854/855)
 IAC, DONT, DO, WONT, WILL, SB, SE = 255, 254, 253, 252, 251, 250, 240
-OPT_ECHO, OPT_SGA = 1, 3
+OPT_ECHO, OPT_SGA, OPT_NAWS = 1, 3, 31
 
 
 class TelnetProtocol:
@@ -28,10 +28,14 @@ class TelnetProtocol:
     peers can never get stuck in a negotiation loop.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, size_getter=None) -> None:
         self._state = "data"
         self._cmd = 0
         self._answered: set[tuple[int, int]] = set()
+        # NAWS (RFC 1073): when the server asks, tell it the window size so the remote side wraps
+        # long lines and lays out full-screen programs (vi, nano) for the size actually shown.
+        self._size_getter = size_getter
+        self.naws_enabled = False
 
     def feed(self, data: bytes) -> tuple[bytes, bytes]:
         out = bytearray()
@@ -68,9 +72,19 @@ class TelnetProtocol:
         if key in self._answered or cmd in (WONT, DONT):
             return b""
         self._answered.add(key)
+        if cmd == DO and option == OPT_NAWS and self._size_getter is not None:
+            self.naws_enabled = True
+            cols, rows = self._size_getter()
+            return bytes([IAC, WILL, OPT_NAWS]) + self.naws(cols, rows)
         if cmd == WILL:
             return bytes([IAC, DO if option in (OPT_ECHO, OPT_SGA) else DONT, option])
         return bytes([IAC, WONT, option])  # DO: we offer no options of our own
+
+    @staticmethod
+    def naws(cols: int, rows: int) -> bytes:
+        """``IAC SB NAWS <width> <height> IAC SE`` (16-bit big endian, IAC bytes doubled)."""
+        size = TelnetProtocol.escape(bytes([(cols >> 8) & 0xFF, cols & 0xFF, (rows >> 8) & 0xFF, rows & 0xFF]))
+        return bytes([IAC, SB, OPT_NAWS]) + size + bytes([IAC, SE])
 
     @staticmethod
     def escape(data: bytes) -> bytes:
@@ -79,6 +93,8 @@ class TelnetProtocol:
 
 class BaseConnection:
     label = "Connection"
+    # Terminal size (cols, rows) to announce when the connection opens; set by the app.
+    initial_size: tuple[int, int] = (80, 24)
     def start(self, incoming: queue.Queue[str]) -> None:
         raise NotImplementedError
     def send(self, data: str) -> None:
@@ -117,7 +133,10 @@ class SSHConnection(BaseConnection):
         incoming.put(f"\r\n[SSH connecting to {self.host}:{self.port} as {self.username}]\r\n")
         try:
             self.client.connect(hostname=self.host, port=self.port, username=self.username or None, password=self.password or None, timeout=self.timeout, look_for_keys=self.look_for_keys, allow_agent=self.allow_agent)
-            self.channel = self.client.invoke_shell(term="xterm", width=100, height=30)
+            cols, rows = self.initial_size
+            # open the PTY at the size actually shown; a wrong size makes the shell wrap long
+            # lines at the wrong column and full-screen editors draw rows that are not visible
+            self.channel = self.client.invoke_shell(term="xterm", width=max(cols, 20), height=max(rows, 5))
         except BaseException:
             self.close()  # do not leak the half-open client/transport thread on failure
             raise
@@ -224,6 +243,18 @@ class TelnetConnection(BaseConnection):
         self.timeout = timeout
         self.sock: socket.socket | None = None
         self.stop_event = threading.Event()
+        self._size: tuple[int, int] | None = None
+        self.protocol = TelnetProtocol(size_getter=lambda: self._size or self.initial_size)
+        self._send_lock = threading.Lock()
+
+    def resize(self, cols: int, rows: int) -> None:
+        self._size = (max(cols, 20), max(rows, 5))
+        if self.sock and self.protocol.naws_enabled:
+            try:
+                with self._send_lock:
+                    self.sock.sendall(TelnetProtocol.naws(*self._size))
+            except OSError:
+                pass
 
     def start(self, incoming: queue.Queue[str]) -> None:
         self.sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
@@ -233,7 +264,7 @@ class TelnetConnection(BaseConnection):
 
     def _read_loop(self, incoming: queue.Queue[str]) -> None:
         decoder = _utf8_decoder()
-        protocol = TelnetProtocol()
+        protocol = self.protocol
         while not self.stop_event.is_set():
             try:
                 if not self.sock: break
@@ -241,7 +272,8 @@ class TelnetConnection(BaseConnection):
                 if not data: break
                 payload, replies = protocol.feed(data)
                 if replies:
-                    self.sock.sendall(replies)
+                    with self._send_lock:
+                        self.sock.sendall(replies)
                 text = decoder.decode(payload)
                 if text: incoming.put(text)
             except socket.timeout: continue
@@ -252,7 +284,8 @@ class TelnetConnection(BaseConnection):
 
     def send(self, data: str) -> None:
         if not self.sock: raise RuntimeError("Telnet socket is not active")
-        self.sock.sendall(TelnetProtocol.escape(data.encode()))
+        with self._send_lock:
+            self.sock.sendall(TelnetProtocol.escape(data.encode()))
 
     def close(self) -> None:
         self.stop_event.set()

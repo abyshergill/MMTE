@@ -76,31 +76,49 @@ class TerminalSession:
         self._formats_ready = False
         self._format_cache: dict[str | None, QTextCharFormat] = {}
         self._resize_job = None
+        # Size last announced to the remote side (None: not announced on this connection yet).
+        self.remote_size: tuple[int, int] | None = None
 
     @property
     def alt_screen_active(self) -> bool:
+        """True while a full-screen program (vi, nano, less, htop) uses the alternate screen.
+
+        pyte stores private modes (``ESC[?1049h``) shifted left by 5 bits."""
         try:
             mode = self.screen.mode
-            return any(m in mode for m in (1049, 47, 1047))
+            return any(m in mode or (m << 5) in mode for m in (1049, 47, 1047))
         except Exception:
             return False
+
+    def sync_remote_size(self) -> None:
+        """Tell the remote side the size that is shown, unless it already knows it."""
+        if not self.connection:
+            self.remote_size = None
+            return
+        size = (self.cols, self.rows)
+        if self.remote_size == size:
+            return
+        try:
+            self.connection.resize(*size)
+            self.remote_size = size
+        except Exception:
+            pass
 
     def resize(self, cols: int, rows: int) -> None:
         cols = max(cols, 20)
         rows = max(rows, 5)
-        if cols == self.cols and rows == self.rows:
-            return
-        self.cols, self.rows = cols, rows
-        try:
-            self.screen.resize(rows, cols)
-        except Exception:
-            pass
-        if self.connection:
+        changed = (cols, rows) != (self.cols, self.rows)
+        if changed:
+            self.cols, self.rows = cols, rows
             try:
-                self.connection.resize(cols, rows)
+                self.screen.resize(rows, cols)
             except Exception:
                 pass
-        self.render()
+        # Even when the local size did not change, the remote side may not know it yet (a new
+        # connection): otherwise the shell wraps at the wrong column and vi/nano draw off-screen.
+        self.sync_remote_size()
+        if changed:
+            self.render()
 
     def scroll_history(self, delta_lines: int) -> None:
         try:
@@ -233,6 +251,10 @@ class TerminalSession:
                             overlay[x] = name
             for x in range(cols):
                 char = row[x]
+                if char.data == "":
+                    # right half of a wide (CJK / emoji) character: the glyph already covers it;
+                    # drawing a space here would push the rest of the row one column right
+                    continue
                 tag = self._tag_for_char(char)
                 if overlay is not None and overlay[x] is not None and (tag is None or tag == "bold"):
                     tag = overlay[x]

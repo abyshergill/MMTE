@@ -39,7 +39,11 @@ class TerminalWidget(QPlainTextEdit):
         text_option.setWrapMode(QTextOption.WrapMode.NoWrap)
         document.setDefaultTextOption(text_option)
 
-        self.setWordWrapMode(QTextOption.WrapMode.WrapAnywhere)
+        # Each terminal row is exactly `cols` characters and the remote side decides where long
+        # lines continue. The widget must never wrap a row visually: that pushed the following
+        # rows down so text appeared on top of other lines.
+        self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         self.setAcceptDrops(True)
         self.setCursorWidth(2)
